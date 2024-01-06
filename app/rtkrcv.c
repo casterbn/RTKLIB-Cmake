@@ -399,6 +399,8 @@ static void readant(vt_t *vt, prcopt_t *opt, nav_t *nav)
     
     free(pcvr.pcv); free(pcvs.pcv);
 }
+
+// 打开实时解算服务
 /* start rtk server ----------------------------------------------------------*/
 static int startsvr(vt_t *vt)
 {
@@ -416,6 +418,7 @@ static int startsvr(vt_t *vt)
     
     trace(3,"startsvr:\n");
     
+    // 调用 readcmd() 从命令文件中读取启动命令
     /* read start commads from command files */
     for (i=0;i<3;i++) {
         if (!*rcvcmds[i]) continue;
@@ -428,10 +431,14 @@ static int startsvr(vt_t *vt)
         }
         else cmds_periodic[i]=s2[i];
     }
+
+    // 调用 confwrite() 确认连接
     /* confirm overwrite */
     for (i=3;i<8;i++) {
         if (strtype[i]==STR_FILE&&!confwrite(vt,strpath[i])) return 0;
     }
+
+    // 设置基准站坐标
     if (prcopt.refpos==4) { /* rtcm */
         for (i=0;i<3;i++) prcopt.rb[i]=0.0;
     }
@@ -440,14 +447,18 @@ static int startsvr(vt_t *vt)
     pos[2]=nmeapos[2];
     pos2ecef(pos,npos);
     
+    // 调用 readant() 读取天线文件
     /* read antenna file */
     readant(vt,&prcopt,&svr.nav);
     
+    // 调用 readdcb() 读取 DCB 文件
     /* read dcb file */
     if (*filopt.dcb) {
         strcpy(sta[0].name,sta_name);
         readdcb(filopt.dcb,&svr.nav,sta);
     }
+
+    // 调用 opengeoid() 读取大地水准面数据
     /* open geoid data file */
     if (solopt[0].geoid>0&&!opengeoid(solopt[0].geoid,filopt.geoid)) {
         trace(2,"geoid data open error: %s\n",filopt.geoid);
@@ -456,6 +467,7 @@ static int startsvr(vt_t *vt)
     for (i=0;*rcvopts[i].name;i++) modflgr[i]=0;
     for (i=0;*sysopts[i].name;i++) modflgs[i]=0;
     
+    // 调用 strsetopt() 设置数据流选项
     /* set stream options */
     stropt[0]=timeout;
     stropt[1]=reconnect;
@@ -466,10 +478,12 @@ static int startsvr(vt_t *vt)
     
     if (strfmt[2]==8) strfmt[2]=STRFMT_SP3;
     
+    // 设置 ftp/http 路径
     /* set ftp/http directory and proxy */
     strsetdir(filopt.tempdir);
     strsetproxy(proxyaddr);
     
+    // 执行 startcmd
     /* execute start command */
     if (*startcmd&&(ret=system(startcmd))) {
         trace(2,"command exec error: %s (%d)\n",startcmd,ret);
@@ -478,6 +492,7 @@ static int startsvr(vt_t *vt)
     solopt[0].posf=strfmt[3];
     solopt[1].posf=strfmt[4];
     
+    // 调用 rtksvrstart() 开启定位解算线程
     /* start rtk server */
     if (!rtksvrstart(&svr,svrcycle,buffsize,strtype,paths,strfmt,navmsgsel,
                      cmds,cmds_periodic,ropts,nmeacycle,nmeareq,npos,&prcopt,
@@ -1623,6 +1638,7 @@ int main(int argc, char **argv)
     int i,start=0,port=0,outstat=0,trace=0,sock=0;
     char *dev="",file[MAXSTR]="";
     
+    // for 循环读取命令行参数
     for (i=1;i<argc;i++) {
         if      (!strcmp(argv[i],"-s")) start=1;
         else if (!strcmp(argv[i],"-p")&&i+1<argc) port=atoi(argv[++i]);
@@ -1635,34 +1651,45 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i],"-sta")&&i+1<argc) strcpy(sta_name,argv[++i]);
         else printusage();
     }
+
+    // 如果设置了 Trace，traceopen() 创建/打开 Trace 文件，tracelevel()设置 Trace 等级
     if (trace>0) {
         traceopen(TRACEFILE);
         tracelevel(trace);
     }
+
+    // 调用 rtksvrinit()、strinit() 初始化实时解算服务和监控端口
     /* initialize rtk server and monitor port */
     rtksvrinit(&svr);
     strinit(&moni);
     
+    // 调用 resetsysopts()、loadopts()、getsysopts()，读取配置文件到 prcopt,solopt,filopt
     /* load options file */
     if (!*file) sprintf(file,"%s/%s",OPTSDIR,OPTSFILE);
-    
     resetsysopts();
     if (!loadopts(file,rcvopts)||!loadopts(file,sysopts)) {
         fprintf(stderr,"no options file: %s. defaults used\n",file);
     }
     getsysopts(&prcopt,solopt,&filopt);
     
+    // 调用 readnav()，从 NAVIFILE（默认rtkrcv.nav）读取星历数据到 svr.nav
     /* read navigation data */
     if (!readnav(NAVIFILE,&svr.nav)) {
         fprintf(stderr,"no navigation data: %s\n",NAVIFILE);
     }
+
+    // 调用 rtkopenstat()，打开/创建结算状态文件
     if (outstat>0) {
         rtkopenstat(STATFILE,outstat);
     }
+
+    // 调用 openmoni()，打开监控端口
     /* open monitor port */
     if (moniport>0&&!openmoni(moniport)) {
         fprintf(stderr,"monitor port open error: %d\n",moniport);
     }
+
+    // 如果传入了远程终端端口，调用 open_sock() 连接，否则设置本地终端
     if (port) {
         /* open socket for remote console */
         if ((sock=open_sock(port))<=0) {
@@ -1683,24 +1710,31 @@ int main(int argc, char **argv)
             return -1;
         }
     }
+
+    // 注册信号处理函数
     signal(SIGINT, sigshut); /* keyboard interrupt */
     signal(SIGTERM,sigshut); /* external shutdown signal */
     signal(SIGUSR2,sigshut);
     signal(SIGHUP ,SIG_IGN);
     signal(SIGPIPE,SIG_IGN);
     
+    // 调用 startsvr()，打开实时解算服务
     /* start rtk server */
     if (start) {
         startsvr(NULL);
     }
+    // 循环，accept_sock() 接受远程终端连接，直到 intflg 为 1
     while (!intflg) {
         /* accept remote console connection */
         accept_sock(sock,con);
         sleepms(100);
     }
+
+    // 调用 stopsvr() 停止实时解算服务
     /* stop rtk server */
     stopsvr(NULL);
     
+    // 调用 closemoni() 关闭监控端口
     /* close consoles */
     for (i=0;i<MAXCON;i++) {
         con_close(con[i]);
@@ -1708,6 +1742,7 @@ int main(int argc, char **argv)
     if (moniport>0) closemoni();
     if (outstat>0) rtkclosestat();
     
+    // 调用 savenav()，保存星历数据
     /* save navigation data */
     if (!savenav(NAVIFILE,&svr.nav)) {
         fprintf(stderr,"navigation data save error: %s\n",NAVIFILE);

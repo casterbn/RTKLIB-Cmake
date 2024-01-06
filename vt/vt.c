@@ -32,6 +32,8 @@
 #endif
 #include "vt.h"
 
+// /dev/tty是键盘和显示器的设备描述文件
+// 向这个文件写相当于显示在用户屏幕上，读相当于从键盘获取用户的输入
 #define DEF_DEV     "/dev/tty"          /* default console device */
 
 #define C_DEL       (char)0x7F          /* delete */
@@ -59,13 +61,17 @@
 *-----------------------------------------------------------------------------*/
 extern vt_t *vt_open(int sock, const char *dev)
 {
+    // 定义了一个模式数组 mode，其中包含了开启终端设备的一些选项
     const char mode[]={C_IAC,C_WILL,C_SUPPGA,C_IAC,C_WILL,C_ECHO};
+
+    // 定义了一个结构体 termios，用于存储终端设备的属性
     struct termios tio={0};
     vt_t *vt;
     int i;
     
     trace(3,"vt_open: sock=%d dev=%s\n",sock,dev);
     
+    // 声明了一个指向 vt_t 类型的指针 vt，用于存储打开的虚拟终端设备的结构体
     if (!(vt=(vt_t *)malloc(sizeof(vt_t)))) {
         return NULL;
     }
@@ -74,19 +80,26 @@ extern vt_t *vt_open(int sock, const char *dev)
     for (i=0;i<MAXHIST;i++) {
         vt->hist[i]=NULL;
     }
+
+    // 判断是否提供了 sock 参数。如果没有提供（即 sock 为 0）
     if (!sock) {
+        // 则打开指定的终端设备（通过参数 dev 或者默认设备 DEF_DEV）
+        // 并将打开的文件描述符赋值给 vt->in 和 vt->out
         if ((vt->in=vt->out=open(*dev?dev:DEF_DEV,O_RDWR))<0) {
             free(vt);
             return 0;
         }
+
+        // 将终端模式设置为不回显模式
         /* set terminal mode echo-off */
-        tcgetattr(vt->in,&vt->tio);
-        tcsetattr(vt->in,TCSANOW,&tio);
+        tcgetattr(vt->in,&vt->tio);         // 读取 tty 终端驱动程序的属性，存储在 vt->tio 结构体中
+        tcsetattr(vt->in,TCSANOW,&tio);     // 设置 tty 终端驱动程序的属性，TCSANOW 表示立即生效
     }
     else {
         vt->type=1;
         vt->in=vt->out=sock;
-        
+
+        // 发送一个 Telnet 字符模式（通过调用 write 函数）
         /* send telnet character mode */
         if (write(sock,mode,6)!=6) {
             free(vt);
@@ -118,6 +131,8 @@ extern void vt_close(vt_t *vt)
     }
     free(vt);
 }
+
+// 清楚虚拟终端缓冲区 vt->buff
 /* clear line buffer ---------------------------------------------------------*/
 static int clear_buff(vt_t *vt)
 {
@@ -129,6 +144,8 @@ static int clear_buff(vt_t *vt)
     vt->n=vt->nesc=vt->cur=0;
     return write(vt->out,buff,p-buff)==p-buff;
 }
+
+// 将光标位置之前的内容移动到缓冲区的开始位置，并将新内容添加到缓冲区的末尾
 /* refresh line buffer -------------------------------------------------------*/
 static int ref_buff(vt_t *vt)
 {
@@ -139,25 +156,34 @@ static int ref_buff(vt_t *vt)
     for (;i>=vt->cur;i--) *p++='\b';
     return write(vt->out,buff,p-buff)==p-buff;
 }
+
+// 函数尝试将光标向右移动一位
 /* move cursor right ---------------------------------------------------------*/
 static int right_cur(vt_t *vt)
-{
+{   
+    // 如果当前光标位置(vt->cur)已经到达缓冲区的末尾(vt->n)，那么函数直接返回1，表示成功但无需移动
     if (vt->cur>=vt->n) return 1;
-    if (write(vt->out,vt->buff+vt->cur,1)<1) return 0;
-    vt->cur++;
+
+    // 尝试将当前位置的内容写入到终端
+    if (write(vt->out,vt->buff+vt->cur,1)<1) return 0; 
+    vt->cur++;      // 更新光标位置(vt->cur++)
     return 1;
 }
+
+// 尝试将光标向左移动一位
 /* move cursor left ----------------------------------------------------------*/
 static int left_cur(vt_t *vt)
 {
+    // 如果当前光标位置(vt->cur)已经到达缓冲区的开始（即索引为0），那么函数直接返回1，表示成功但无需移动
     if (vt->cur<=0) return 1;
-    vt->cur--;
-    return write(vt->out,"\b",1)==1;
+    vt->cur--;      // 它将光标位置减 1
+    return write(vt->out,"\b",1)==1;    // 尝试在终端上删除一个字符
 }
 /* delete character before cursor --------------------------------------------*/
 static int del_cur(vt_t *vt)
 {
     int i;
+    // 如果当前光标位置(vt->cur)已经到达缓冲区的开始（即索引为0），那么函数直接返回1，表示成功但无需移动
     if (vt->cur<=0) return 1;
     for (i=vt->cur;i<vt->n;i++) vt->buff[i-1]=vt->buff[i];
     vt->n--;

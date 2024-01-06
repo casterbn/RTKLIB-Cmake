@@ -1696,39 +1696,41 @@ extern void rtkfree(rtk_t *rtk)
     free(rtk->xa); rtk->xa=NULL;
     free(rtk->Pa); rtk->Pa=NULL;
 }
+
+// 这个函数的功能主要是实现实时动态定位（单历元定位），在这个函数内可选择不同的定位模式，包括 SPP，PPP，RTK 等  
 /* precise positioning ---------------------------------------------------------
 * input observation data and navigation message, compute rover position by 
 * precise positioning
-* args   : rtk_t *rtk       IO  RTK control/result struct
-*            rtk->sol       IO  solution
-*                .time      O   solution time
-*                .rr[]      IO  rover position/velocity
-*                               (I:fixed mode,O:single mode)
-*                .dtr[0]    O   receiver clock bias (s)
-*                .dtr[1-5]  O   receiver GLO/GAL/BDS/IRN/QZS-GPS time offset (s)
-*                .Qr[]      O   rover position covarinace
-*                .stat      O   solution status (SOLQ_???)
-*                .ns        O   number of valid satellites
-*                .age       O   age of differential (s)
-*                .ratio     O   ratio factor for ambiguity validation
-*            rtk->rb[]      IO  base station position/velocity
-*                               (I:relative mode,O:moving-base mode)
+* args   : rtk_t *rtk       IO  RTK control/result struct                           RTK 控制结构体
+*            rtk->sol       IO  solution                                            结果结构体
+*                .time      O   solution time                                       解算时间
+*                .rr[]      IO  rover position/velocity                             流动站位置，速度，fixed 模式要输入，单点定位模式作为输出
+*                               (I:fixed mode,O:single mode)                        
+*                .dtr[0]    O   receiver clock bias (s)                             接收机 GPS 钟差
+*                .dtr[1-5]  O   receiver GLO/GAL/BDS/IRN/QZS-GPS time offset (s)    接收机 GLO/GAL/BDS/IRN/QZS-GPS 钟差 (ISB)
+*                .Qr[]      O   rover position covarinace                           流动站坐标协方差
+*                .stat      O   solution status (SOLQ_???)                          解的状态SOLQ_???
+*                .ns        O   number of valid satellites                          有效卫星数
+*                .age       O   age of differential (s)                             差分龄期
+*                .ratio     O   ratio factor for ambiguity validation               模糊度固定 Ratio 值
+*            rtk->rb[]      IO  base station position/velocity                      基准站位置速度，相对定位一般做输入，动基线模式做输出
+*                               (I:relative mode,O:moving-base mode)                
 *            rtk->nx        I   number of all states
 *            rtk->na        I   number of integer states
-*            rtk->ns        O   number of valid satellites in use
-*            rtk->tt        O   time difference between current and previous (s)
-*            rtk->x[]       IO  float states pre-filter and post-filter
-*            rtk->P[]       IO  float covariance pre-filter and post-filter
-*            rtk->xa[]      O   fixed states after AR
-*            rtk->Pa[]      O   fixed covariance after AR
-*            rtk->ssat[s]   IO  satellite {s+1} status
-*                .sys       O   system (SYS_???)
-*                .az   [r]  O   azimuth angle   (rad) (r=0:rover,1:base)
-*                .el   [r]  O   elevation angle (rad) (r=0:rover,1:base)
-*                .vs   [r]  O   data valid single     (r=0:rover,1:base)
-*                .resp [f]  O   freq(f+1) pseudorange residual (m)
-*                .resc [f]  O   freq(f+1) carrier-phase residual (m)
-*                .vsat [f]  O   freq(f+1) data vaild (0:invalid,1:valid)
+*            rtk->ns        O   number of valid satellites in use                   有效卫星数
+*            rtk->tt        O   time difference between current and previous (s)    相邻历元间隔
+*            rtk->x[]       IO  float states pre-filter and post-filter             浮点解
+*            rtk->P[]       IO  float covariance pre-filter and post-filter         浮点解协方差
+*            rtk->xa[]      O   fixed states after AR                               固定解 
+*            rtk->Pa[]      O   fixed covariance after AR                           固定解协方差
+*            rtk->ssat[s]   IO  satellite {s+1} status                              卫星结果状态控制结构体数组
+*                .sys       O   system (SYS_???)                                    卫星导航系统 
+*                .az   [r]  O   azimuth angle   (rad) (r=0:rover,1:base)            方位角 
+*                .el   [r]  O   elevation angle (rad) (r=0:rover,1:base)            高度角
+*                .vs   [r]  O   data valid single     (r=0:rover,1:base)            
+*                .resp [f]  O   freq(f+1) pseudorange residual (m)                  伪距残差 
+*                .resc [f]  O   freq(f+1) carrier-phase residual (m)                载波相位残差
+*                .vsat [f]  O   freq(f+1) data vaild (0:invalid,1:valid)            
 *                .fix  [f]  O   freq(f+1) ambiguity flag
 *                               (0:nodata,1:float,2:fix,3:hold)
 *                .slip [f]  O   freq(f+1) cycle slip flag
@@ -1765,17 +1767,23 @@ extern int rtkpos(rtk_t *rtk, const obsd_t *obs, int n, const nav_t *nav)
     trace(3,"rtkpos  : time=%s n=%d\n",time_str(obs[0].time,3),n);
     trace(4,"obs=\n"); traceobs(4,obs,n);
     
+    // 设置 rtk 内基准站坐标，基准站坐标在 execses() 函数内已经计算了，速度设为 0.0
+    // 这里将配置结构体 opt 内基准站的坐标赋值给解算结构体 rtk 内基准站的坐标
     /* set base staion position */
     if (opt->refpos<=POSOPT_RINEX&&opt->mode!=PMODE_SINGLE&&
         opt->mode!=PMODE_MOVEB) {
         for (i=0;i<6;i++) rtk->rb[i]=i<3?opt->rb[i]:0.0;
     }
+
+    // 统计基准站、流动站观测值个数 nu、nr，可用于后面判断是否满足差分条件
     /* count rover/base station observations */
     for (nu=0;nu   <n&&obs[nu   ].rcv==1;nu++) ;
     for (nr=0;nu+nr<n&&obs[nu+nr].rcv==2;nr++) ;
     
     time=rtk->sol.time; /* previous epoch */
     
+    // 利用观测值及星历计算流动站的 SPP 定位结果，作为 kalman 滤波的近似坐标。需要注意，
+    // 如果由于流动站 SPP 定位结果坐标误差过大等原因导致的 SPP 无解，则不进行 rtk 运算，当前历元无解
     /* rover position by single point positioning */
     if (!pntpos(obs,nu,nav,&rtk->opt,&rtk->sol,NULL,rtk->ssat,msg)) {
         errmsg(rtk,"point pos error (%s)\n",msg);
@@ -1785,36 +1793,52 @@ extern int rtkpos(rtk_t *rtk, const obsd_t *obs, int n, const nav_t *nav)
             return 0;
         }
     }
+
+    // 计算当前历元和上一历元时间差 rtk->tt，其中 rtk->sol.time 是当前历元时间，time 是上一历元时间
     if (time.time!=0) rtk->tt=timediff(rtk->sol.time,time);
     
+    // 如果是单点定位模式直接输出刚刚 SPP 算的坐标
     /* single point positioning */
     if (opt->mode==PMODE_SINGLE) {
         outsolstat(rtk);
         return 1;
     }
+
+    // 如果不是单点模式，抑制单点解的输出
     /* suppress output of single solution */
     if (!opt->outsingle) {
         rtk->sol.stat=SOLQ_NONE;
     }
+
+    // 精密单点定位模式调用 pppos() 进行解算
     /* precise point positioning */
     if (opt->mode>=PMODE_PPP_KINEMA) {
         pppos(rtk,obs,nu,nav);
         outsolstat(rtk);
         return 1;
     }
+
+    // 程序能运行到这，一定是相对定位模式了
+    // 检查该历元流动站观测时间和基准站观测时间是否对应，若无基准站观测数据直接 return
     /* check number of data of base station and age of differential */
     if (nr==0) {
         errmsg(rtk,"no base station observation data for rtk\n");
         outsolstat(rtk);
         return 1;
     }
+
+    //  动基线的基站坐标需要随时间同步变化，所以需要计算出变化速率,
+    //  解释了前面除了单点定位，动基线也不参与基站解算，动基线在这里单独解算
     if (opt->mode==PMODE_MOVEB) { /*  moving baseline */
         
+        // 调用 pntpos() 计算基准站位置
         /* estimate position/velocity of base station */
         if (!pntpos(obs+nu,nr,nav,&rtk->opt,&solb,NULL,NULL,msg)) {
             errmsg(rtk,"base station position error (%s)\n",msg);
             return 0;
         }
+
+        // 计算差分龄期 rtk->sol.age
         rtk->sol.age=(float)timediff(rtk->sol.time,solb.time);
         
         if (fabs(rtk->sol.age)>TTOL_MOVEB) {
@@ -1823,6 +1847,7 @@ extern int rtkpos(rtk_t *rtk, const obsd_t *obs, int n, const nav_t *nav)
         }
         for (i=0;i<6;i++) rtk->rb[i]=solb.rr[i];
         
+        // 把 solb.rr 赋值给 rtk->rb
         /* time-synchronized position of base station */
         for (i=0;i<3;i++) rtk->rb[i]+=rtk->rb[i+3]*rtk->sol.age;
     }
@@ -1835,6 +1860,8 @@ extern int rtkpos(rtk_t *rtk, const obsd_t *obs, int n, const nav_t *nav)
             return 1;
         }
     }
+
+    // 上面的步骤只算了相对定位的差分龄期和动基线坐标，这里调用 relpos() 进行相位定位，并输出最终结果
     /* relative potitioning */
     relpos(rtk,obs,nu,nr,nav);
     outsolstat(rtk);

@@ -53,7 +53,6 @@
 #define MAXINFILE   1000         /* max number of input files */
 
 /* constants/global variables ------------------------------------------------*/
-
 static pcvs_t pcvss={0};        /* receiver antenna parameters */
 static pcvs_t pcvsr={0};        /* satellite antenna parameters */
 static obs_t obss={0};          /* observation data */
@@ -88,11 +87,15 @@ static int checkbrk(const char *format, ...)
     va_start(arg,format);
     p+=vsprintf(p,format,arg);
     va_end(arg);
+
+    // 输出基准站流动站名
     if (*proc_rov&&*proc_base) sprintf(p," (%s-%s)",proc_rov,proc_base);
     else if (*proc_rov ) sprintf(p," (%s)",proc_rov );
     else if (*proc_base) sprintf(p," (%s)",proc_base);
     return showmsg(buff);
 }
+
+// 输出基准站坐标
 /* output reference position -------------------------------------------------*/
 static void outrpos(FILE *fp, const double *r, const solopt_t *opt)
 {
@@ -131,6 +134,7 @@ static void outheader(FILE *fp, char **file, int n, const prcopt_t *popt,
     
     trace(3,"outheader: n=%d\n",n);
     
+    // 如果是 NMEA、STAT，不需要输出文件头，直接返回
     if (sopt->posf==SOLF_NMEA||sopt->posf==SOLF_STAT) {
         return;
     }
@@ -163,6 +167,8 @@ static void outheader(FILE *fp, char **file, int n, const prcopt_t *popt,
     if (sopt->outopt) {
         outprcopt(fp,popt);
     }
+
+    // 相对定位模式调用 outrpos() 输出基准站坐标
     if (PMODE_DGPS<=popt->mode&&popt->mode<=PMODE_FIXED&&popt->mode!=PMODE_MOVEB) {
         fprintf(fp,"%s ref pos   :",COMMENTH);
         outrpos(fp,popt->rb,sopt);
@@ -172,6 +178,8 @@ static void outheader(FILE *fp, char **file, int n, const prcopt_t *popt,
     
     outsolhead(fp,sopt);
 }
+
+
 /* search next observation data index ----------------------------------------*/
 static int nextobsf(const obs_t *obs, int *i, int rcv)
 {
@@ -1180,16 +1188,28 @@ extern int postpos(gtime_t ts, gtime_t te, double ti, double tu,
                    const filopt_t *fopt, char **infile, int n, char *outfile,
                    const char *rov, const char *base)
 {
-    gtime_t tts,tte,ttte;
-    double tunit,tss;
-    int i,j,k,nf,stat=0,week,flag=1,index[MAXINFILE]={0};
-    char *ifile[MAXINFILE],ofile[1024],*ext;
+    gtime_t tts,                // 解算开始时间
+            tte,                // 解算结束时间
+            ttte;               // 读取星历文件的结束时间
+    double tunit,               // 
+           tss;                 // 
+    int i,j,k,                  // 循环和数组下标控制
+        nf,                     // 文件路径数组下标控制
+        stat=0,                 // 接收返回状态值，为1
+        week,                   // 用于存 GPST 的周
+        flag=1,                 // 
+        index[MAXINFILE]={0};   // 
+    char *ifile[MAXINFILE],     // 
+         ofile[1024],           // 
+         *ext;                  // 
     
     trace(3,"postpos : ti=%.0f tu=%.0f n=%d outfile=%s\n",ti,tu,n,outfile);
     
+    // 调用 openses() 开始处理，文件读取，赋值 navs、pcvs、pcvsr
     /* open processing session */
     if (!openses(popt,sopt,fopt,&navs,&pcvss,&pcvsr)) return -1;
     
+    // 判断起始时间 ts、te、处理单位时间是否大于 0
     if (ts.time!=0&&te.time!=0&&tu>=0.0) {
         if (timediff(te,ts)<0.0) {
             showmsg("error : no period");

@@ -492,12 +492,15 @@ static void *strsvrthread(void *arg)
     svr->tick=tickget();
     tick_nmea=svr->tick-1000;
     
+    // 循环，直到 svr->state 为 false
     for (cyc=0;svr->state;cyc++) {
         tick=tickget();
-        
+
+        // 循环调用 strread() 从输入流读取数据
         /* read data from input stream */
         while ((n=strread(svr->stream,svr->buff,svr->buffsize))>0&&svr->state) {
             
+            // 遍历输出流，调用 strconv() 数据转换，调用 strwrite() 将转换后的数据写入输出流
             /* write data to output streams */
             for (i=1;i<svr->nstr;i++) {
                 if (svr->conv[i-1]) {
@@ -507,6 +510,8 @@ static void *strsvrthread(void *arg)
                     strwrite(svr->stream+i,svr->buff,n);
                 }
             }
+
+            // 写日志
             /* write data to log stream */
             strwrite(svr->strlog,svr->buff,n);
             
@@ -516,23 +521,31 @@ static void *strsvrthread(void *arg)
             }
             unlock(&svr->lock);
         }
+        // 遍历输出流
         for (i=1;i<svr->nstr;i++) {
-            
+            // 循环调用 strread() 循环从输出流读取数据
             /* read message from output stream */
             while ((n=strread(svr->stream+i,buff,sizeof(buff)))>0) {
-                
+
+                // 将信息从输出流转回输入流
                 /* relay back message from output stream to input stream */
                 if (i==svr->relayback) {
                     strwrite(svr->stream,buff,n);
                 }
+
+                // 将数据写入日志流
                 /* write data to log stream */
                 strwrite(svr->strlog+i,buff,n);
             }
         }
+
+        // 调用 periodic_cmd() 向输入流发 periodic 命令
         /* write periodic command to input stream */
         for (i=0;i<svr->nstr;i++) {
             periodic_cmd(cyc*svr->cycle,svr->cmds_periodic[i],svr->stream+i);
         }
+
+        // 调用 strsendnmea() 向输入流写 NMEA
         /* write nmea messages to input stream */
         if (svr->nmeacycle>0&&(int)(tick-tick_nmea)>=svr->nmeacycle) {
             sol_nmea.stat=SOLQ_SINGLE;
@@ -541,6 +554,8 @@ static void *strsvrthread(void *arg)
             strsendnmea(svr->stream,&sol_nmea);
             tick_nmea=tick;
         }
+
+        // 休眠等待下一次数据
         sleepms(svr->cycle-(int)(tickget()-tick));
     }
     for (i=0;i<svr->nstr;i++) strclose(svr->stream+i);
@@ -580,6 +595,8 @@ extern void strsvrinit(strsvr_t *svr, int nout)
     svr->thread=0;
     initlock(&svr->lock);
 }
+
+// 开启数据流服务线程，执行 strsvrthread() 
 /* start stream server ---------------------------------------------------------
 * start stream server
 * args   : strsvr_t *svr    IO  stream sever struct
@@ -640,9 +657,11 @@ extern int strsvrstart(strsvr_t *svr, int *opts, int *strs, char **paths,
     tracet(3,"strsvrstart:\n");
     
     if (svr->state) return 0;
-    
+
+    // 调用 strinitcom()，如果定义了 WIN32，初始化 Windows下的网络编程接口 Winsock
     strinitcom();
     
+    // 赋值 strsvr_t 结构体 svr
     for (i=0;i<4;i++) stropt[i]=opts[i];
     stropt[4]=opts[6];
     strsetopt(stropt);
@@ -661,6 +680,8 @@ extern int strsvrstart(strsvr_t *svr, int *opts, int *strs, char **paths,
         free(svr->buff); free(svr->pbuf);
         return 0;
     }
+
+    // 调用 stropen()，开启数据流
     /* open streams */
     for (i=0;i<svr->nstr;i++) {
         strcpy(file1,paths[0]); if ((p=strstr(file1,"::"))) *p='\0';
@@ -680,11 +701,15 @@ extern int strsvrstart(strsvr_t *svr, int *opts, int *strs, char **paths,
         for (i--;i>=0;i--) strclose(svr->stream+i);
         return 0;
     }
+
+    // 调用 stropen()，打开日志数据流
     /* open log streams */
     for (i=0;i<svr->nstr;i++) {
         if (strs[i]==STR_NONE||strs[i]==STR_FILE||!*logs[i]) continue;
         stropen(svr->strlog+i,STR_FILE,STR_MODE_W,logs[i]);
     }
+
+    // 先调用 strwrite() 发送空字符串，再调用 strsendcmd() 发送开始的命令 cmds[i]
     /* write start commands to input/output streams */
     for (i=0;i<svr->nstr;i++) {
         if (!cmds[i]) continue;
@@ -694,6 +719,7 @@ extern int strsvrstart(strsvr_t *svr, int *opts, int *strs, char **paths,
     }
     svr->state=1;
     
+    // 创建线程，执行 strsvrthread() 函数
     /* create stream server thread */
 #ifdef WIN32
     if (!(svr->thread=CreateThread(NULL,0,strsvrthread,svr,0,NULL))) {

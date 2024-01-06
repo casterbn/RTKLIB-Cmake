@@ -15,20 +15,20 @@
 #define MAXHIST     256                 /* size of history buffer */
 
 /* type definitions ----------------------------------------------------------*/
-typedef struct vt_tag {                 /* virtual console type */
-    int state;                          /* state(0:close,1:open) */
-    int type;                           /* type (0:dev,1:telnet) */
-    int in,out;                         /* input/output file descriptor */
-    int n,nesc;                         /* number of line buffer/escape */
-    int cur;                            /* cursor position */
-    int cur_h;                          /* current history */
-    int brk;                            /* break status */
-    int blind;                          /* blind inpu mode */
-    struct termios tio;                 /* original terminal attribute */
-    char buff[MAXBUFF];                 /* line buffer */
-    char esc[8];                        /* escape buffer */
-    char *hist[MAXHIST];                /* history buffer */
-    FILE *logfp;                        /* log file pointer */
+typedef struct vt_tag {                 /* virtual console type */          // 
+    int state;                          /* state(0:close,1:open) */         // (0:close,1:open)
+    int type;                           /* type (0:dev,1:telnet) */         // (0:dev,1:telnet)
+    int in,out;                         /* input/output file descriptor */  // 输入、输出文件描述符
+    int n,nesc;                         /* number of line buffer/escape */  // 当前行数
+    int cur;                            /* cursor position */               // 光标位置
+    int cur_h;                          /* current history */               // 光标历史位置
+    int brk;                            /* break status */                  // 
+    int blind;                          /* blind inpu mode */               // 
+    struct termios tio;                 /* original terminal attribute */   // 屏蔽输入模式
+    char buff[MAXBUFF];                 /* line buffer */                   //
+    char esc[8];                        /* escape buffer */                 //
+    char *hist[MAXHIST];                /* history buffer */                // 历史字符串
+    FILE *logfp;                        /* log file pointer */              // log 文件指针
 } vt_t;
 
 /* function prototypes -------------------------------------------------------*/

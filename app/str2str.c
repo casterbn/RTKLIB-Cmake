@@ -231,6 +231,8 @@ int main(int argc, char **argv)
         cmds[i]=cmd_strs[i];
         cmds_periodic[i]=cmd_periodic_strs[i];
     }
+
+    // 循环解析命令行参数
     for (i=1;i<argc;i++) {
         if (!strcmp(argv[i],"-in")&&i+1<argc) {
             if (!decodepath(argv[++i],types,paths[0],fmts)) return -1;
@@ -277,8 +279,11 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i],"-t"  )&&i+1<argc) trlevel=atoi(argv[++i]);
         else if (*argv[i]=='-') printhelp();
     }
+
+    // 如果没指定输出，就设为 stdout
     if (n<=0) n=1; /* stdout */
     
+    // 遍历每种输出，检测有效性，调用 strconvnew() 创建并赋值对应的 strconv 结构体
     for (i=0;i<n;i++) {
         if (fmts[i+1]<=0) continue;
         if (fmts[i+1]!=STRFMT_RTCM3) {
@@ -306,32 +311,44 @@ int main(int argc, char **argv)
         matcpy(conv[i]->out.sta.pos,stapos,3,1);
         matcpy(conv[i]->out.sta.del,stadel,3,1);
     }
+
+    // 注册信号处理函数，收到 SIGTERM、SIGTERM 信号时，调用 sigfunc()，intrflg 设为1，退出线程循环
     signal(SIGTERM,sigfunc);
     signal(SIGINT ,sigfunc);
     signal(SIGHUP ,SIG_IGN);
     signal(SIGPIPE,SIG_IGN);
     
+    // 调用 strsvrinit()，初始化 svr 结构体
     strsvrinit(&strsvr,n+1);
     
+    // 如果设置了 Trace，traceopen() 创建/打开 Trace 文件，tracelevel()设置 Trace 等级
     if (trlevel>0) {
         traceopen(*logfile?logfile:TRFILE);
         tracelevel(trlevel);
     }
     fprintf(stderr,"stream server start\n");
     
+    // 调用 strsetdir()，设置 ftp/http 下载到的本地目录路径
     strsetdir(local);
+
+    // 调用 strsetproxy()，设置 http/ntrip 代理地址
     strsetproxy(proxy);
     
+    // 遍历输出流，调用 readcmd() 读取命令
     for (i=0;i<MAXSTR;i++) {
         if (*cmdfile[i]) readcmd(cmdfile[i],cmds[i],0);
         if (*cmdfile[i]) readcmd(cmdfile[i],cmds_periodic[i],2);
     }
+
+    // 调用 strsvrstart() 开启 stream server
     /* start stream server */
     if (!strsvrstart(&strsvr,opts,types,paths,logs,conv,cmds,cmds_periodic,
                      stapos)) {
         fprintf(stderr,"stream server start error\n");
         return -1;
     }
+
+    // 一直循环，获取并输出 stream server 状态，直到 intrflg 为 1（因为被发送了 SIGINT 信号）
     for (intrflg=0;!intrflg;) {
         
         /* get stream server status */
@@ -345,12 +362,17 @@ int main(int argc, char **argv)
         
         sleepms(dispint);
     }
+
+    // 调用 readcmd() 以类型 1 读取 CMD 参数
     for (i=0;i<MAXSTR;i++) {
         if (*cmdfile[i]) readcmd(cmdfile[i],cmds[i],1);
     }
+
+    // 调用 strsvrstop() 关闭数据流服务
     /* stop stream server */
     strsvrstop(&strsvr,cmds);
     
+    // 循环调用 strconvfree() 释放 conv 结构体
     for (i=0;i<n;i++) {
         strconvfree(conv[i]);
     }

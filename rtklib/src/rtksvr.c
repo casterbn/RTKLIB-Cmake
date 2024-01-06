@@ -557,6 +557,8 @@ static void send_nmea(rtksvr_t *svr, uint32_t *tickreset)
 			   sol_nmea.rr[2]);
 	}
 }
+
+// 实时定位解算线程
 /* rtk server thread ---------------------------------------------------------*/
 #ifdef WIN32
 static DWORD WINAPI rtksvrthread(void *arg)
@@ -586,14 +588,18 @@ static void *rtksvrthread(void *arg)
         for (i=0;i<3;i++) {
             p=svr->buff[i]+svr->nb[i]; q=svr->buff[i]+svr->buffsize;
             
+            // 调用 strread() 从输入流读取数据
             /* read receiver raw/rtcm data from input stream */
             if ((n=strread(svr->stream+i,p,q-p))<=0) {
                 continue;
             }
+
+            // 把读到的 raw/rtcm 数据写到日志流
             /* write receiver raw/rtcm data to log stream */
             strwrite(svr->stream+i+5,p,n);
             svr->nb[i]+=n;
             
+            // 保存 peek buffer
             /* save peek buffer */
             rtksvrlock(svr);
             n=n<svr->buffsize-svr->npb[i]?n:svr->buffsize-svr->npb[i];
@@ -602,6 +608,7 @@ static void *rtksvrthread(void *arg)
             rtksvrunlock(svr);
         }
         for (i=0;i<3;i++) {
+            // 若为精密星历，调用 decodefile() 解码；否则调用 decoderaw() 解码。
             if (svr->format[i]==STRFMT_SP3||svr->format[i]==STRFMT_RNXCLK) {
                 /* decode download file */
                 decodefile(svr,i);
@@ -611,6 +618,8 @@ static void *rtksvrthread(void *arg)
                 fobs[i]=decoderaw(svr,i);
             }
         }
+
+        // 循环调用 pntpos() 进行 SPP 解算，解得的平均坐标作为基准站坐标
         /* averaging single base pos */
         if (fobs[1]>0&&svr->rtk.opt.refpos==POSOPT_SINGLE) {
             if ((svr->rtk.opt.maxaveep<=0||svr->nave<svr->rtk.opt.maxaveep)&&
@@ -623,6 +632,8 @@ static void *rtksvrthread(void *arg)
             }
             for (i=0;i<3;i++) svr->rtk.opt.rb[i]=svr->rb_ave[i];
         }
+
+        // 对每一个流动站的数据，调用 rtkpos 进行定位计算
         for (i=0;i<fobs[0];i++) { /* for each rover observation data */
             obs.n=0;
             for (j=0;j<svr->obs[0][i].n&&obs.n<MAXOBS*2;j++) {
@@ -631,15 +642,20 @@ static void *rtksvrthread(void *arg)
             for (j=0;j<svr->obs[1][0].n&&obs.n<MAXOBS*2;j++) {
                 obs.data[obs.n++]=svr->obs[1][0].data[j];
             }
+
+            // 调用 corr_phase_bias() 进行 FCB 改正
             /* carrier phase bias correction */
             if (!strstr(svr->rtk.opt.pppopt,"-DIS_FCB")) {
                 corr_phase_bias(obs.data,obs.n,&svr->nav);
             }
+
+            // 调用 rtkpos() 解算流动站坐标
             /* rtk positioning */
             rtksvrlock(svr);
             rtkpos(&svr->rtk,obs.data,obs.n,&svr->nav);
             rtksvrunlock(svr);
             
+            // 如果有结果，调用 writesol() 输出
             if (svr->rtk.sol.stat!=SOLQ_NONE) {
                 
                 /* adjust current time */
@@ -654,15 +670,21 @@ static void *rtksvrthread(void *arg)
                 svr->prcout+=fobs[0]-i-1;
             }
         }
+
+        // 无解时发送空解（1hz）
         /* send null solution if no solution (1hz) */
         if (svr->rtk.sol.stat==SOLQ_NONE&&(int)(tick-tick1hz)>=1000) {
             writesol(svr,0);
             tick1hz=tick;
         }
+
+        // 调用 periodic_cmd() 向输入流发送命令 periodic
         /* write periodic command to input stream */
         for (i=0;i<3;i++) {
             periodic_cmd(cycle*svr->cycle,svr->cmds_periodic[i],svr->stream+i);
         }
+
+        // 若有需要，向基准站、Ntrip 输入流发送 NMEA 请求
         /* send nmea request to base/nrtk input stream */
         if (svr->nmeacycle>0&&(int)(tick-ticknmea)>=svr->nmeacycle) {
             send_nmea(svr,&tickreset);
@@ -670,10 +692,15 @@ static void *rtksvrthread(void *arg)
         }
         if ((cputime=(int)(tickget()-tick))>0) svr->cputime=cputime;
          
+        // 休眠等下一次循环
         /* sleep until next cycle */
         sleepms(svr->cycle-cputime);
     }
+
+    // 循环解算解束，调用 strclose() 关闭数据流
     for (i=0;i<MAXSTRRTK;i++) strclose(svr->stream+i);
+
+    // 释放开辟的 svr 缓冲区
     for (i=0;i<3;i++) {
         svr->nb[i]=svr->npb[i]=0;
         free(svr->buff[i]); svr->buff[i]=NULL;
@@ -841,11 +868,16 @@ extern int rtksvrstart(rtksvr_t *svr, int cycle, int buffsize, int *strs,
     tracet(3,"rtksvrstart: cycle=%d buffsize=%d navsel=%d nmeacycle=%d nmeareq=%d\n",
            cycle,buffsize,navsel,nmeacycle,nmeareq);
     
+    // 如果定位解算服务已经开启，直接返回
     if (svr->state) {
         sprintf(errmsg,"server already started");
         return 0;
     }
+
+    // 调用 strinitcom() 如果定义了 WIN32，初始化 Windows下的网络编程接口 Winsock
     strinitcom();
+
+    // 初始化 svr 结构体，赋值传入的参数
     svr->cycle=cycle>1?cycle:1;
     svr->nmeacycle=nmeacycle>1000?nmeacycle:1000;
     svr->nmeareq=nmeareq;
@@ -858,12 +890,14 @@ extern int rtksvrstart(rtksvr_t *svr, int cycle, int buffsize, int *strs,
     svr->prcout=0;
     rtkfree(&svr->rtk);
     rtkinit(&svr->rtk,prcopt);
-    
+
     if (prcopt->initrst) { /* init averaging pos by restart */
         svr->nave=0;
         for (i=0;i<3;i++) svr->rb_ave[i]=0.0;
     }
-    for (i=0;i<3;i++) { /* input/log streams */
+
+    // 遍历输入输出日志数据流，开辟空间
+    for (i=0;i<3;i++) { /* input/log streams */ 
         svr->nb[i]=svr->npb[i]=0;
         if (!(svr->buff[i]=(uint8_t *)malloc(buffsize))||
             !(svr->pbuf[i]=(uint8_t *)malloc(buffsize))) {
@@ -875,17 +909,22 @@ extern int rtksvrstart(rtksvr_t *svr, int cycle, int buffsize, int *strs,
         for (j=0;j<MAXOBSBUF;j++) svr->obs[i][j].n=0;
         strcpy(svr->cmds_periodic[i],!cmds_periodic[i]?"":cmds_periodic[i]);
         
+        // 初始化 raw 和 rtcm 解析控制结构体
         /* initialize receiver raw and rtcm control */
         init_raw(svr->raw+i,formats[i]);
         init_rtcm(svr->rtcm+i);
         
+        // 设置 raw 和 rtcm 选项
         /* set receiver and rtcm option */
         strcpy(svr->raw [i].opt,rcvopts[i]);
         strcpy(svr->rtcm[i].opt,rcvopts[i]);
         
+        // DGPS 改正
         /* connect dgps corrections */
         svr->rtcm[i].dgps=svr->nav.dgps;
     }
+
+    // 开辟输出缓冲区
     for (i=0;i<2;i++) { /* output peek buffer */
         if (!(svr->sbuf[i]=(uint8_t *)malloc(buffsize))) {
             tracet(1,"rtksvrstart: malloc error\n");
@@ -893,24 +932,32 @@ extern int rtksvrstart(rtksvr_t *svr, int cycle, int buffsize, int *strs,
             return 0;
         }
     }
+
+    // 设置结果选项结构体 svr->solopt
     /* set solution options */
     for (i=0;i<2;i++) {
         svr->solopt[i]=solopt[i];
     }
+
+    // 设置基准站坐标
     /* set base station position */
     if (prcopt->refpos!=POSOPT_SINGLE) {
         for (i=0;i<6;i++) {
             svr->rtk.rb[i]=i<3?prcopt->rb[i]:0.0;
         }
     }
+
+    // 更新星历数据时间
     /* update navigation data */
     for (i=0;i<MAXSAT*4 ;i++) svr->nav.eph [i].ttr=time0;
     for (i=0;i<NSATGLO*2;i++) svr->nav.geph[i].tof=time0;
     for (i=0;i<NSATSBS*2;i++) svr->nav.seph[i].tof=time0;
     
+    // 设置监控数据流
     /* set monitor stream */
     svr->moni=moni;
     
+    // 调用 stropen() 打开输入数据流
     /* open input streams */
     for (i=0;i<8;i++) {
         rw=i<3?STR_MODE_R:STR_MODE_W;
@@ -927,10 +974,13 @@ extern int rtksvrstart(rtksvr_t *svr, int cycle, int buffsize, int *strs,
             svr->rtcm[i].time=strs[i]==STR_FILE?strgettime(svr->stream+i):time;
         }
     }
+
+    // 调用 strsync() 同步输入数据流
     /* sync input streams */
     strsync(svr->stream,svr->stream+1);
     strsync(svr->stream,svr->stream+2);
     
+    // 向输入数据流发送启动命令
     /* write start commands to input streams */
     for (i=0;i<3;i++) {
         if (!cmds[i]) continue;
@@ -938,10 +988,14 @@ extern int rtksvrstart(rtksvr_t *svr, int cycle, int buffsize, int *strs,
         sleepms(100);
         strsendcmd(svr->stream+i,cmds[i]);
     }
+
+    // 调用 writesolhead() 输出结果文件头
     /* write solution header to solution streams */
     for (i=3;i<5;i++) {
         writesolhead(svr->stream+i,svr->solopt+i-3);
     }
+
+    // 创建定位解算线程执行 rtksvrthread() 
     /* create rtk server thread */
 #ifdef WIN32
     if (!(svr->thread=CreateThread(NULL,0,rtksvrthread,svr,0,NULL))) {
@@ -969,6 +1023,7 @@ extern void rtksvrstop(rtksvr_t *svr, char **cmds)
     
     tracet(3,"rtksvrstop:\n");
     
+    // 向输入数据流发送关闭命令
     /* write stop commands to input streams */
     rtksvrlock(svr);
     for (i=0;i<3;i++) {

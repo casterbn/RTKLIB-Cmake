@@ -110,6 +110,7 @@ static int eph_sel[]={ /* GPS,GLO,GAL,QZS,BDS,IRN,SBS */
     0,0,0,0,0,0,0
 };
 
+// 用 URA 用户测距精度标定方差
 /* variance by ura ephemeris -------------------------------------------------*/
 static double var_uraeph(int sys, int ura)
 {
@@ -137,12 +138,14 @@ static double var_urassr(int ura)
     std=(pow(3.0,(ura>>3)&7)*(1.0+(ura&7)/4.0)-1.0)*1E-3;
     return SQR(std);
 }
+
+// 用 alm_t 中存的历书求卫星位置、钟差
 /* almanac to satellite position and clock bias --------------------------------
 * compute satellite position and clock bias with almanac (gps, galileo, qzss)
-* args   : gtime_t time     I   time (gpst)
-*          alm_t *alm       I   almanac
-*          double *rs       O   satellite position (ecef) {x,y,z} (m)
-*          double *dts      O   satellite clock bias (s)
+* args   : gtime_t time     I   信号发射时间 (gpst)
+*          alm_t *alm       I   历书参数结构体
+*          double *rs       O   卫星位置 (ecef) {x,y,z} (m)
+*          double *dts      O   卫星钟差 (s)
 * return : none
 * notes  : see ref [1],[7],[8]
 *-----------------------------------------------------------------------------*/
@@ -180,6 +183,8 @@ extern void alm2pos(gtime_t time, const alm_t *alm, double *rs, double *dts)
     rs[2]=y*sin(i);
     *dts=alm->f0+alm->f1*tk;
 }
+
+// 根据信号发射时间和广播星历，计算卫星钟差，不考虑相对论效应和 TGD
 /* broadcast ephemeris to satellite clock bias ---------------------------------
 * compute satellite clock bias with broadcast ephemeris (gps, galileo, qzss)
 * args   : gtime_t time     I   time by satellite clock (gpst)
@@ -195,13 +200,19 @@ extern double eph2clk(gtime_t time, const eph_t *eph)
     
     trace(4,"eph2clk : time=%s sat=%2d\n",time_str(time,3),eph->sat);
     
+    // 计算与星历参考时间的偏差 dt = t-toc
     t=ts=timediff(time,eph->toc);
     
+    // 利用二项式校正计算出卫星钟差，从 dt 中减去这部分，然后再进行一次上述操作，得到最终的 dt
     for (i=0;i<2;i++) {
-        t=ts-(eph->f0+eph->f1*t+eph->f2*t*t);
+        t=ts-(eph->f0+eph->f1*t+eph->f2*t*t);   // (E.4.16)
     }
+
+    // 使用二项式校正得到最终的钟差
     return eph->f0+eph->f1*t+eph->f2*t*t;
 }
+
+// 根据广播星历计算出算信号发射时刻卫星的位置和钟差
 /* broadcast ephemeris to satellite position and clock bias --------------------
 * compute satellite position and clock bias with broadcast ephemeris (gps,
 * galileo, qzss)
@@ -224,19 +235,25 @@ extern void eph2pos(gtime_t time, const eph_t *eph, double *rs, double *dts,
     
     trace(4,"eph2pos : time=%s sat=%2d\n",time_str(time,3),eph->sat);
     
+    // 通过卫星轨道半长轴 A 判断星历是否有效，无效则返回
     if (eph->A<=0.0) {
         rs[0]=rs[1]=rs[2]=*dts=*var=0.0;
         return;
     }
+    // 计算规化时间 tk (E.4.2)
     tk=timediff(time,eph->toe);
     
+    // 根据不同卫星系统设置相应的地球引力常数 mu 和 地球自转角速度 omge
     switch ((sys=satsys(eph->sat,&prn))) {
         case SYS_GAL: mu=MU_GAL; omge=OMGE_GAL; break;
         case SYS_CMP: mu=MU_CMP; omge=OMGE_CMP; break;
         default:      mu=MU_GPS; omge=OMGE;     break;
     }
+
+    // 计算平近点角 M (E.4.3)
     M=eph->M0+(sqrt(mu/(eph->A*eph->A*eph->A))+eph->deln)*tk;
     
+    // 用牛顿迭代法来计算偏近点角 E。参考 RTKLIB manual P145 (E.4.19) (E.4.4)
     for (n=0,E=M,Ek=0.0;fabs(E-Ek)>RTOL_KEPLER&&n<MAX_ITER_KEPLER;n++) {
         Ek=E; E-=(E-eph->e*sin(E)-M)/(1.0-eph->e*cos(E));
     }
@@ -248,6 +265,7 @@ extern void eph2pos(gtime_t time, const eph_t *eph, double *rs, double *dts,
     
     trace(4,"kepler: sat=%2d e=%8.5f n=%2d del=%10.3e\n",eph->sat,eph->e,n,E-Ek);
     
+    // 计算摄动改正后的升交点角距 u 卫星矢径长度 r 轨道倾角 i
     u=atan2(sqrt(1.0-eph->e*eph->e)*sinE,cosE-eph->e)+eph->omg;
     r=eph->A*(1.0-eph->e*cosE);
     i=eph->i0+eph->idot*tk;
@@ -257,9 +275,11 @@ extern void eph2pos(gtime_t time, const eph_t *eph, double *rs, double *dts,
     i+=eph->cis*sin2u+eph->cic*cos2u;
     x=r*cos(u); y=r*sin(u); cosi=cos(i);
     
+    // 北斗的 MEO、IGSO 卫星计算方法与 GPS, Galileo and QZSS 相同，只是一些参数不同
+    // GEO 卫星的 O 和最后位置的计算稍有不同 
     /* beidou geo satellite */
     if (sys==SYS_CMP&&(prn<=5||prn>=59)) { /* ref [9] table 4-1 */
-        O=eph->OMG0+eph->OMGd*tk-omge*eph->toes;
+        O=eph->OMG0+eph->OMGd*tk-omge*eph->toes;    // (E.4.29)
         sinO=sin(O); cosO=cos(O);
         xg=x*cosO-y*cosi*sinO;
         yg=x*sinO+y*cosi*cosO;
@@ -336,6 +356,7 @@ extern double geph2clk(gtime_t time, const geph_t *geph)
     }
     return -geph->taun+geph->gamn*t;
 }
+
 /* glonass ephemeris to satellite position and clock bias ----------------------
 * compute satellite position and clock bias with glonass ephemeris
 * args   : gtime_t time     I   time (gpst)
@@ -370,6 +391,7 @@ extern void geph2pos(gtime_t time, const geph_t *geph, double *rs, double *dts,
     
     *var=SQR(ERREPH_GLO);
 }
+
 /* sbas ephemeris to satellite clock bias --------------------------------------
 * compute satellite clock bias with sbas ephemeris
 * args   : gtime_t time     I   time by satellite clock (gpst)
@@ -539,6 +561,7 @@ static int ephpos(gtime_t time, gtime_t teph, int sat, const nav_t *nav,
     
     trace(4,"ephpos  : time=%s sat=%2d iode=%d\n",time_str(time,3),sat,iode);
     
+    // 调用 satsys() 函数，确定该卫星所属的导航系统
     sys=satsys(sat,NULL);
     
     *svh=-1;
@@ -566,6 +589,7 @@ static int ephpos(gtime_t time, gtime_t teph, int sat, const nav_t *nav,
     }
     else return 0;
     
+    // 在信号发射时刻的基础上给定一个微小的时间间隔，再次计算新时刻的 P、V、C
     /* satellite velocity and clock drift by differential approx */
     for (i=0;i<3;i++) rs[i+3]=(rst[i]-rs[i])/tt;
     dts[1]=(dtst[0]-dts[0])/tt;
@@ -698,18 +722,20 @@ static int satpos_ssr(gtime_t time, gtime_t teph, int sat, const nav_t *nav,
     
     return 1;
 }
+
+// 计算信号发射时刻卫星的 P(ecef,m)、V(ecef,m/s)、C((s|s/s))
 /* satellite position and clock ------------------------------------------------
-* compute satellite position, velocity and clock
-* args   : gtime_t time     I   time (gpst)
-*          gtime_t teph     I   time to select ephemeris (gpst)
-*          int    sat       I   satellite number
-*          nav_t  *nav      I   navigation data
-*          int    ephopt    I   ephemeris option (EPHOPT_???)
-*          double *rs       O   sat position and velocity (ecef)
-*                               {x,y,z,vx,vy,vz} (m|m/s)
-*          double *dts      O   sat clock {bias,drift} (s|s/s)
-*          double *var      O   sat position and clock error variance (m^2)
-*          int    *svh      O   sat health flag (-1:correction not available)
+* compute satellite position, velocity and clock                                
+* args   : gtime_t time     I   time (gpst)                                     卫星信号发射时间
+*          gtime_t teph     I   time to select ephemeris (gpst)                 用于选择星历的时刻
+*          int    sat       I   satellite number                                卫星号
+*          nav_t  *nav      I   navigation data                                 NAV 导航数据
+*          int    ephopt    I   ephemeris option (EPHOPT_???)                   星历选项 (EPHOPT_???)
+*          double *rs       O   sat position and velocity (ecef)                卫星位置和速度，长度为 6*n
+*                               {x,y,z,vx,vy,vz} (m|m/s)                        
+*          double *dts      O   sat clock {bias,drift} (s|s/s)                  卫星钟差，长度为2*n， {bias,drift} (s|s/s)
+*          double *var      O   sat position and clock error variance (m^2)     卫星位置和钟差的协方差 (m^2)
+*          int    *svh      O   sat health flag (-1:correction not available)   卫星健康标志 (-1:correction not available)
 * return : status (1:ok,0:error)
 * notes  : satellite position is referenced to antenna phase center
 *          satellite clock does not include code bias correction (tgd or bgd)
@@ -722,28 +748,31 @@ extern int satpos(gtime_t time, gtime_t teph, int sat, int ephopt,
     
     *svh=0;
     
+    // 根据星历选项调用对应的解算函数
     switch (ephopt) {
-        case EPHOPT_BRDC  : return ephpos     (time,teph,sat,nav,-1,rs,dts,var,svh);
-        case EPHOPT_SBAS  : return satpos_sbas(time,teph,sat,nav,   rs,dts,var,svh);
-        case EPHOPT_SSRAPC: return satpos_ssr (time,teph,sat,nav, 0,rs,dts,var,svh);
-        case EPHOPT_SSRCOM: return satpos_ssr (time,teph,sat,nav, 1,rs,dts,var,svh);
+        case EPHOPT_BRDC  : return ephpos     (time,teph,sat,nav,-1,rs,dts,var,svh);    // 广播星历
+        case EPHOPT_SBAS  : return satpos_sbas(time,teph,sat,nav,   rs,dts,var,svh);    // SBAS
+        case EPHOPT_SSRAPC: return satpos_ssr (time,teph,sat,nav, 0,rs,dts,var,svh);    // 参考天线相位中心
+        case EPHOPT_SSRCOM: return satpos_ssr (time,teph,sat,nav, 1,rs,dts,var,svh);    // 参考质心，还需要天线相位中心改正
         case EPHOPT_PREC  :
-            if (!peph2pos(time,sat,nav,1,rs,dts,var)) break; else return 1;
+            if (!peph2pos(time,sat,nav,1,rs,dts,var)) break; else return 1;             // 精密星历
     }
     *svh=-1;
     return 0;
 }
+
+// 按照所观测到的卫星顺序计算出每颗卫星的位置、速度、{钟差、频漂}
 /* satellite positions and clocks ----------------------------------------------
 * compute satellite positions, velocities and clocks
-* args   : gtime_t teph     I   time to select ephemeris (gpst)
-*          obsd_t *obs      I   observation data
-*          int    n         I   number of observation data
-*          nav_t  *nav      I   navigation data
-*          int    ephopt    I   ephemeris option (EPHOPT_???)
-*          double *rs       O   satellite positions and velocities (ecef)
-*          double *dts      O   satellite clocks
-*          double *var      O   sat position and clock error variances (m^2)
-*          int    *svh      O   sat health flag (-1:correction not available)
+* args   : gtime_t teph     I   time to select ephemeris (gpst)                 (gpst) 用于选择星历的时刻 (gpst)
+*          obsd_t *obs      I   observation data                                OBS 观测数据
+*          int    n         I   number of observation data                      OBS 数
+*          nav_t  *nav      I   navigation data                                 NAV 导航电文
+*          int    ephopt    I   ephemeris option (EPHOPT_???)                   星历选项 (EPHOPT_???)
+*          double *rs       O   satellite positions and velocities (ecef)       卫星位置和速度，长度为6*n，{x,y,z,vx,vy,vz}(ecef)(m,m/s)
+*          double *dts      O   satellite clocks                                卫星钟差，长度为2*n， {bias,drift} (s|s/s)
+*          double *var      O   sat position and clock error variances (m^2)    卫星位置和钟差的协方差 (m^2)
+*          int    *svh      O   sat health flag (-1:correction not available)   卫星健康标志 (-1:correction not available)
 * return : none
 * notes  : rs [(0:2)+i*6]= obs[i] sat position {x,y,z} (m)
 *          rs [(3:5)+i*6]= obs[i] sat velocity {vx,vy,vz} (m/s)
@@ -766,11 +795,15 @@ extern void satposs(gtime_t teph, const obsd_t *obs, int n, const nav_t *nav,
     
     trace(3,"satposs : teph=%s n=%d ephopt=%d\n",time_str(teph,3),n,ephopt);
     
+    // 遍历每一条观测数据
     for (i=0;i<n&&i<2*MAXOBS;i++) {
+
+        // 首先初始化，将对当前观测数据的 rs、dts、var和svh数组的元素置 0
         for (j=0;j<6;j++) rs [j+i*6]=0.0;
         for (j=0;j<2;j++) dts[j+i*2]=0.0;
         var[i]=0.0; svh[i]=0;
         
+        // 通过判断某一频率下信号的伪距是否为 0，来得到此时所用的频率个数
         /* search any pseudorange */
         for (j=0,pr=0.0;j<NFREQ;j++) if ((pr=obs[i].P[j])!=0.0) break;
         
@@ -778,22 +811,30 @@ extern void satposs(gtime_t teph, const obsd_t *obs, int n, const nav_t *nav,
             trace(3,"no pseudorange %s sat=%2d\n",time_str(obs[i].time,3),obs[i].sat);
             continue;
         }
+
+        // 用数据接收时刻减去伪距信号传播时间，得到卫星信号的发射时刻
         /* transmission time by satellite clock */
         time[i]=timeadd(obs[i].time,-pr/CLIGHT);
         
+        // 调用 ephclk() 函数，由广播星历计算出当前观测卫星与 GPS 时间的钟差 dt
         /* satellite clock bias by broadcast ephemeris */
         if (!ephclk(time[i],teph,obs[i].sat,nav,&dt)) {
             trace(3,"no broadcast clock %s sat=%2d\n",time_str(time[i],3),obs[i].sat);
             continue;
         }
+        // 信号发射时刻减去钟差 dt，得到 GPS 时间下的卫星信号发射时刻
         time[i]=timeadd(time[i],-dt);
         
+        // 调用 satpos() 函数，计算信号发射时刻卫星的位置(ecef,m)、速度(ecef,m/s)、钟差((s|s/s))
+        // 注意，这里计算出的钟差是考虑了相对论效应的了，只是还没有考虑 TGD
         /* satellite position and clock at transmission time */
         if (!satpos(time[i],teph,obs[i].sat,ephopt,nav,rs+i*6,dts+i*2,var+i,
                     svh+i)) {
             trace(3,"no ephemeris %s sat=%2d\n",time_str(time[i],3),obs[i].sat);
             continue;
         }
+
+        // 如果没有精密钟差，则用广播星历的钟差替代，钟漂设为 0
         /* if no precise clock available, use broadcast clock instead */
         if (dts[i*2]==0.0) {
             if (!ephclk(time[i],teph,obs[i].sat,nav,dts+i*2)) continue;
