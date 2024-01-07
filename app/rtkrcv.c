@@ -437,7 +437,7 @@ static int startsvr(vt_t *vt)
     for (i=3;i<8;i++) {
         if (strtype[i]==STR_FILE&&!confwrite(vt,strpath[i])) return 0;
     }
-
+    
     // 设置基准站坐标
     if (prcopt.refpos==4) { /* rtcm */
         for (i=0;i<3;i++) prcopt.rb[i]=0.0;
@@ -1543,7 +1543,7 @@ static void accept_sock(int ssock, con_t **con)
 *     option. To configure the processing options, edit the options file or use
 *     set, load or save command on the console. To shutdown the program, use
 *     shutdown command on the console or send USR2 signal to the process.
-*
+*   
 * option
 *     -s         start RTK server on program startup
 *     -p port    port number for telnet console
@@ -1554,7 +1554,7 @@ static void accept_sock(int ssock, con_t **con)
 *     -r level   output solution status file (0:off,1:states,2:residuals)
 *     -t level   debug trace level (0:off,1-5:on)
 *     -sta sta   station name for receiver dcb
-*
+*   
 * command
 *     start
 *       Start RTK server. No need the command if the program runs with -s
@@ -1595,12 +1595,12 @@ static void accept_sock(int ssock, con_t **con)
 *     option [opt]
 *       Show the values of processing options. Without option, all options are
 *       displayed. With option, only pattern-matched options are displayed.
-*
+*       
 *     set opt [val]
 *       Set the value of a processing option to val. With out option val,
 *       prompt message is shown to input the value. The change of the 
 *       processing option is not enabled before RTK server is restarted.
-*
+*       
 *     load [file]
 *       Load processing options from file. Without option, default file
 *       rtkrcv.conf is used. To enable the changes, restart RTK server.
@@ -1608,14 +1608,14 @@ static void accept_sock(int ssock, con_t **con)
 *     save [file]
 *       Save current processing optons to file. Without option, default file
 *       rtkrcv.conf is used.
-*
+*       
 *     log [file|off]
 *       Record console log to file. To stop recording the log, use option off.
 *
 *     help|? [path]
 *       Show the command list. With option path, the stream path options are
 *       shown.
-*
+*       
 *     exit
 *       Exit and logout console. The status of RTK server is not affected by
 *       the command.
@@ -1626,7 +1626,7 @@ static void accept_sock(int ssock, con_t **con)
 *     !command [arg...]
 *       Execute command by the operating system shell. Do not use the
 *       interactive command.
-*
+*       
 * notes
 *     Short form of a command is allowed. In case of the short form, the
 *     command is distinguished according to header characters.
@@ -1658,7 +1658,7 @@ int main(int argc, char **argv)
         tracelevel(trace);
     }
 
-    // 调用 rtksvrinit()、strinit() 初始化实时解算服务和监控端口
+    // 调用 rtksvrinit()、strinit() 初始化实时解算服务和监控端口控制结构体
     /* initialize rtk server and monitor port */
     rtksvrinit(&svr);
     strinit(&moni);
@@ -1678,7 +1678,7 @@ int main(int argc, char **argv)
         fprintf(stderr,"no navigation data: %s\n",NAVIFILE);
     }
 
-    // 调用 rtkopenstat()，打开/创建结算状态文件
+    // 调用 rtkopenstat()，打开/创建解算状态文件
     if (outstat>0) {
         rtkopenstat(STATFILE,outstat);
     }

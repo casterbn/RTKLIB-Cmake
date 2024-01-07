@@ -311,47 +311,44 @@ rtkrcv [-s][-p port|-d dev][-o file][-t level]
 
 ### 1、简介
 
-命令行实时定位解算程序。
-
-
-
-
+在一台电脑上开 rtkrcv 实时定位解算，然后可以用另一台电脑通过 IP 地址和端口号连接，
 
 
 
 ### 2、命令行参数
 
-*     `-s`：程序启动的时候开启 RTK 定位解算
-*     `-p port`：port number for telnet console
-*     `-m port`：port number for monitor stream
-*     `-d dev`：terminal device for console
-*     `-o file`：处理选项文件
-*     `-w pwd`：login password for remote console ("": no password)
-*     `-r level`：output solution status file (0:off,1:states,2:residuals)
-*     `-t level`：debug trace level (0:off,1-5:on)
-*     `-sta sta`：station name for receiver dcb
+*     `-s`：程序启动的时候开启 RTK 定位解算。
+*     `-p port`：远程终端的端口号。
+*     `-m port`：远程监控的端口号。
+*     `-d dev`：终端设备。
+*     `-o file`：处理选项文件，与 RNX2RTKP 相同，可以在界面程序 RTKPOST、RTKNAVI 上设置然后导出。
+*     `-w pwd`：远程终端连接密码 ("": 无密码)。
+*     `-r level`：输出解算状态文件 (0:off,1:states,2:residuals)。
+*     `-t level`：Trace 调试级别 (0:off,1-5:on)。
+*     `-sta sta`：接收机测站名。
 
 ### 3、终端命令
 
 * `start`：开启实时解算，如果程序执行时传入了 -s 参数就不需要再用这个命令。
 * `stop`：停止定位解算。
 * `restart`：重启定位解算，如果处理选项重新设置了，发送这个命令使能新选项。
-* `solution [cycle]`：输出实时定位结果，如果
-* `status [cycle]`：输出解算状态，
-* `satellite [-n] [cycle]`：输出卫星状态，
-* `observ [-n] [cycle]`：
-* `navidata [cycle]`：
-* `stream [cycle]`：
-* `error`：
-* `option [opt]`：
-* `set opt [val]`：
-* `load [file]`：
-* `save [file]`：
-* `log [file|off]`：
-* `help|? [path]`：
-* `exit`：
-* `shutdown`：
-* `!command [arg...]`：
+* 输出命令：如果不加 cycle 就是只输出一个结果，加了 cycle 就是按指定频率输出。
+  * `solution [cycle]`：输出实时定位结果。
+  * `status [cycle]`：输出解算状态。
+  * `satellite [-n] [cycle]`：输出卫星状态。
+  * `observ [-n] [cycle]`：输出观测数据。
+  * `navidata [cycle]`：输出星历数据。
+  * `stream [cycle]`：输出数据流状态。
+* `error`：输出错误和警告信息，Ctrl-C 停止。
+* `option [opt]`：输出处理选项，如果不跟 opt 就输出所有选项，加了 opt 就输出指定选项。
+* `set opt [val]`：Save current processing optons to file. Without option, default file rtkrcv.conf is used.
+* `load [file]`：导入处理选项文件，如果不加选项文件路径，默认读取 rtkrcv.conf；restart 重启定位解算来启用新的处理选项。
+* `save [file]`：保存当前处理选项到文件，如果不加文件路径，默认存到 rtkrcv.conf。
+* `log [file|off]`：log file 存下终端的 log 到文件，log off 停止记录。
+* `help|? [path]`：输出命令列表，
+* `exit`：退出终端连接，不影响定位解算解算。
+* `shutdown`：停止定位解算，退出程序。
+* `!command [arg...]`：执行操作系统的 shell 命令，不能使用需要交互的命令。
 
 ### 4、函数调用关系
 
@@ -400,64 +397,64 @@ OPTIONS
 
 使用方法：`str2str [-in stream] [-out stream [-out stream...]] [options]`
 
+* 数据流路径：
 
+  ```c
+  serial       : serial://port[:brate[:bsize[:parity[:stopb[:fctr]]]]]
+  tcp server   : tcpsvr://:port
+  tcp client   : tcpcli://addr[:port]
+  ntrip client : ntrip://[user[:passwd]@]addr[:port][/mntpnt]
+  ntrip server : ntrips://[:passwd@]addr[:port]/mntpnt[:str] (only out)
+  ntrip caster : ntripc://[user:passwd@][:port]/mntpnt[:srctbl] (only out)
+  file         : [file://]path[::T][::+start][::xseppd][::S=swap]
+  ```
 
-数据流路径 stream path：
+* 数据格式：
 
-```yaml
-serial       : serial://port[:brate[:bsize[:parity[:stopb[:fctr]]]]]
-tcp server   : tcpsvr://:port
-tcp client   : tcpcli://addr[:port]
-ntrip client : ntrip://[user[:passwd]@]addr[:port][/mntpnt]
-ntrip server : ntrips://[:passwd@]addr[:port]/mntpnt[:str] (only out)
-ntrip caster : ntripc://[user:passwd@][:port]/mntpnt[:srctbl] (only out)
-file         : [file://]path[::T][::+start][::xseppd][::S=swap]
-```
+  ```c
+  rtcm2        : RTCM 2 (only in)
+  rtcm3        : RTCM 3
+  nov          : NovAtel OEMV/4/6,OEMStar (only in)
+  oem3         : NovAtel OEM3 (only in)
+  ubx          : ublox LEA-4T/5T/6T (only in)
+  ss2          : NovAtel Superstar II (only in)
+  hemis        : Hemisphere Eclipse/Crescent (only in)
+  stq          : SkyTraq S1315F (only in)
+  javad        : Javad (only in)
+  nvs          : NVS BINR (only in)
+  binex        : BINEX (only in)
+  rt17         : Trimble RT17 (only in)
+  sbf          : Septentrio SBF (only in)
+  ```
 
-数据格式 format：
+* 选项：
 
-```yaml
-rtcm2        : RTCM 2 (only in)
-rtcm3        : RTCM 3
-nov          : NovAtel OEMV/4/6,OEMStar (only in)
-oem3         : NovAtel OEM3 (only in)
-ubx          : ublox LEA-4T/5T/6T (only in)
-ss2          : NovAtel Superstar II (only in)
-hemis        : Hemisphere Eclipse/Crescent (only in)
-stq          : SkyTraq S1315F (only in)
-javad        : Javad (only in)
-nvs          : NVS BINR (only in)
-binex        : BINEX (only in)
-rt17         : Trimble RT17 (only in)
-sbf          : Septentrio SBF (only in)
-```
+  ```c
+  -sta sta          station id
+  -opt opt          receiver dependent options
+  -s  msec          timeout time (ms) [10000]
+  -r  msec          reconnect interval (ms) [10000]
+  -n  msec          nmea request cycle (m) [0]
+  -f  sec           file swap margin (s) [30]
+  -c  file          input commands file [no]
+  -c1 file          output 1 commands file [no]
+  -c2 file          output 2 commands file [no]
+  -c3 file          output 3 commands file [no]
+  -c4 file          output 4 commands file [no]
+  -p  lat lon hgt   station position (latitude/longitude/height) (deg,m)
+  -px x y z         station position (x/y/z-ecef) (m)
+  -a  antinfo       antenna info (separated by ,)
+  -i  rcvinfo       receiver info (separated by ,)
+  -o  e n u         antenna offset (e,n,u) (m)
+  -l  local_dir     ftp/http local directory []
+  -x  proxy_addr    http/ntrip proxy address [no]
+  -b  str_no        relay back messages from output str to input str [no]
+  -t  level         trace level [0]
+  -fl file          log file [str2str.trace]
+  -h                print help
+  ```
 
-选项 option：
-
-```yaml
--sta sta          station id
--opt opt          receiver dependent options
--s  msec          timeout time (ms) [10000]
--r  msec          reconnect interval (ms) [10000]
--n  msec          nmea request cycle (m) [0]
--f  sec           file swap margin (s) [30]
--c  file          input commands file [no]
--c1 file          output 1 commands file [no]
--c2 file          output 2 commands file [no]
--c3 file          output 3 commands file [no]
--c4 file          output 4 commands file [no]
--p  lat lon hgt   station position (latitude/longitude/height) (deg,m)
--px x y z         station position (x/y/z-ecef) (m)
--a  antinfo       antenna info (separated by ,)
--i  rcvinfo       receiver info (separated by ,)
--o  e n u         antenna offset (e,n,u) (m)
--l  local_dir     ftp/http local directory []
--x  proxy_addr    http/ntrip proxy address [no]
--b  str_no        relay back messages from output str to input str [no]
--t  level         trace level [0]
--fl file          log file [str2str.trace]
--h                print help
-```
+  
 
 
 

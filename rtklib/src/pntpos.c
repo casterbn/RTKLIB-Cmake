@@ -109,13 +109,17 @@ static double prange(const obsd_t *obs, const nav_t *nav, const prcopt_t *opt,
     P2=obs->P[1];
     *var=0.0;
     
+    // 如果没有足够伪距观测值，直接返回
     if (P1==0.0||(opt->ionoopt==IONOOPT_IFLC&&P2==0.0)) return 0.0;
     
+    // 从 nav->cbias 取 DCB 数据
     /* P1-C1,P2-C2 DCB correction */
     if (sys==SYS_GPS||sys==SYS_GLO) {
         if (obs->code[0]==CODE_L1C) P1+=nav->cbias[sat-1][1]; /* C1->P1 */
         if (obs->code[1]==CODE_L2C) P2+=nav->cbias[sat-1][2]; /* C2->P2 */
     }
+
+    // 如果是消电离层组合，将 C1、C2 伪距做 DCB 改正，加上 P1_C1、P2_C2 归化到 P1、P2，计算得到消电离层观测值 PC
     if (opt->ionoopt==IONOOPT_IFLC) { /* dual-frequency */
         
         if (sys==SYS_GPS||sys==SYS_QZS) { /* L1-L2,G1-G2 */
@@ -146,6 +150,8 @@ static double prange(const obsd_t *obs, const nav_t *nav, const prcopt_t *opt,
             return (P2-gamma*P1)/(1.0-gamma);
         }
     }
+
+    // 如果单频，将 C1 伪距做 DCB 改正，归化到 P1
     else { /* single-freq (L1/E1/B1) */
         *var=SQR(ERR_CBIAS);
         

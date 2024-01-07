@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(MSF)
+project(RTKLIB-CMake)
 
 # set build flags. 
 set(CMAKE_CXX_FLAGS "-std=c++20" )
