@@ -2588,6 +2588,8 @@ extern int readblq(const char *file, const char *sta, double *odisp)
     trace(2,"no otl parameters: sta=%s file=%s\n",sta,file);
     return 0;
 }
+
+// 读取 ERP 参数
 /* read earth rotation parameters ----------------------------------------------
 * read earth rotation parameters
 * args   : char   *file       I   IGS ERP file (IGS ERP ver.2)
@@ -2603,18 +2605,25 @@ extern int readerp(const char *file, erp_t *erp)
     
     trace(3,"readerp: file=%s\n",file);
     
+    // 以读的方式打开文件
     if (!(fp=fopen(file,"r"))) {
         trace(2,"erp file open error: file=%s\n",file);
         return 0;
     }
+
+    // 循环读取每一行
     while (fgets(buff,sizeof(buff),fp)) {
+        // sscanf 格式化取值，文件头不符合格式，自然就被跳过
         if (sscanf(buff,"%lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf",
                    v,v+1,v+2,v+3,v+4,v+5,v+6,v+7,v+8,v+9,v+10,v+11,v+12,v+13)<5) {
             continue;
         }
+        // 如果 erp 参数量超出容量，就扩大一倍容量
         if (erp->n>=erp->nmax) {
             erp->nmax=erp->nmax<=0?128:erp->nmax*2;
             erp_data=(erpd_t *)realloc(erp->data,sizeof(erpd_t)*erp->nmax);
+            
+            // 空间开辟失败，就退出不继续读取
             if (!erp_data) {
                 free(erp->data); erp->data=NULL; erp->n=erp->nmax=0;
                 fclose(fp);
@@ -2633,6 +2642,8 @@ extern int readerp(const char *file, erp_t *erp)
     fclose(fp);
     return 1;
 }
+
+// 插值获取当前时间的 ERP 参数
 /* get earth rotation parameter values -----------------------------------------
 * get earth rotation parameter values
 * args   : erp_t  *erp        I   earth rotation parameters
@@ -2648,10 +2659,13 @@ extern int geterp(const erp_t *erp, gtime_t time, double *erpv)
     
     trace(4,"geterp:\n");
     
+    // 如果没有 ERP 参数直接返回
     if (erp->n<=0) return 0;
     
+    // 计算当前 mjd
     mjd=51544.5+(timediff(gpst2utc(time),epoch2time(ep)))/86400.0;
     
+    // 若当前时间早于 ERP 参数中最早的时间，采用最早的时间来计算
     if (mjd<=erp->data[0].mjd) {
         day=mjd-erp->data[0].mjd;
         erpv[0]=erp->data[0].xp     +erp->data[0].xpr*day;
@@ -2660,6 +2674,8 @@ extern int geterp(const erp_t *erp, gtime_t time, double *erpv)
         erpv[3]=erp->data[0].lod;
         return 1;
     }
+
+    // 若当前时间晚于 ERP 参数中最晚的时间，采用最晚的时间来计算
     if (mjd>=erp->data[erp->n-1].mjd) {
         day=mjd-erp->data[erp->n-1].mjd;
         erpv[0]=erp->data[erp->n-1].xp     +erp->data[erp->n-1].xpr*day;
@@ -2668,6 +2684,8 @@ extern int geterp(const erp_t *erp, gtime_t time, double *erpv)
         erpv[3]=erp->data[erp->n-1].lod;
         return 1;
     }
+
+    // 若当前时间在 ERP 参数中最早与最晚的时间之间，则先找到最接近的两个时间，然后用插值。
     for (j=0,k=erp->n-1;j<k-1;) {
         i=(j+k)/2;
         if (mjd<erp->data[i].mjd) k=i; else j=i;
@@ -3593,6 +3611,8 @@ extern void dops(int ns, const double *azel, double elmin, double *dop)
         dop[3]=SQRT(Q[10]);                 /* VDOP */
     }
 }
+
+// 克罗布歇模型利用广播星历电离层八参数计算电离层改正量
 /* ionosphere model ------------------------------------------------------------
 * compute ionospheric delay by broadcast ionosphere model (klobuchar model)
 * args   : gtime_t t        I   time (gpst)
@@ -3612,33 +3632,33 @@ extern double ionmodel(gtime_t t, const double *ion, const double *pos,
     int week;
     
     if (pos[2]<-1E3||azel[1]<=0) return 0.0;
-    if (norm(ion,8)<=0.0) ion=ion_default;
+    if (norm(ion,8)<=0.0) ion=ion_default;       // 若没有电离层参数，用默认参数
     
-    /* earth centered angle (semi-circle) */
-    psi=0.0137/(azel[1]/PI+0.11)-0.022;
+    /* earth centered angle (semi-circle) */    
+    psi=0.0137/(azel[1]/PI+0.11)-0.022;         // 计算地心角 psi (E.5.6)
     
     /* subionospheric latitude/longitude (semi-circle) */
-    phi=pos[0]/PI+psi*cos(azel[0]);
-    if      (phi> 0.416) phi= 0.416;
+    phi=pos[0]/PI+psi*cos(azel[0]);             // 计算穿刺点地理纬度 phi (E.5.7)
+    if      (phi> 0.416) phi= 0.416;            // phi 不超出 (-0.416,0.416)范围
     else if (phi<-0.416) phi=-0.416;
-    lam=pos[1]/PI+psi*sin(azel[0])/cos(phi*PI);
+    lam=pos[1]/PI+psi*sin(azel[0])/cos(phi*PI); // 计算穿刺点地理经度 lam (E.5.8)
     
     /* geomagnetic latitude (semi-circle) */
-    phi+=0.064*cos((lam-1.617)*PI);
+    phi+=0.064*cos((lam-1.617)*PI);             // 计算穿刺点地磁纬度加到 phi (E.5.9)
     
     /* local time (s) */
-    tt=43200.0*lam+time2gpst(t,&week);
+    tt=43200.0*lam+time2gpst(t,&week);          // 计算穿刺点地方时 tt (E.5.10)
     tt-=floor(tt/86400.0)*86400.0; /* 0<=tt<86400 */
     
     /* slant factor */
-    f=1.0+16.0*pow(0.53-azel[1]/PI,3.0);
+    f=1.0+16.0*pow(0.53-azel[1]/PI,3.0);        // 计算投影系数 f (E.5.11)
     
     /* ionospheric delay */
     amp=ion[0]+phi*(ion[1]+phi*(ion[2]+phi*ion[3]));
     per=ion[4]+phi*(ion[5]+phi*(ion[6]+phi*ion[7]));
     amp=amp<    0.0?    0.0:amp;
     per=per<72000.0?72000.0:per;
-    x=2.0*PI*(tt-50400.0)/per;
+    x=2.0*PI*(tt-50400.0)/per;      // (E.5.12)
     
     return CLIGHT*f*(fabs(x)<1.57?5E-9+amp*(1.0+x*x*(-0.5+x*x/24.0)):5E-9);
 }
@@ -3653,6 +3673,8 @@ extern double ionmapf(const double *pos, const double *azel)
     if (pos[2]>=HION) return 1.0;
     return 1.0/cos(asin((RE_WGS84+pos[2])/(RE_WGS84+HION)*sin(PI/2.0-azel[1])));
 }
+
+// 计算电离层穿刺点
 /* ionospheric pierce point position -------------------------------------------
 * compute ionospheric pierce point (ipp) position and slant factor
 * args   : double *pos      I   receiver position {lat,lon,h} (rad,m)
@@ -3669,21 +3691,24 @@ extern double ionppp(const double *pos, const double *azel, double re,
 {
     double cosaz,rp,ap,sinap,tanap;
     
+    // z 并不是仰角 azel[1]，而是仰角关于的补角，所以程序中在计算 rp 是采用的是 cos(azel[1]) 的写法
     rp=re/(re+hion)*cos(azel[1]);
-    ap=PI/2.0-azel[1]-asin(rp);
+    ap=PI/2.0-azel[1]-asin(rp);     // (E.5.14) (E.5.16)
     sinap=sin(ap);
     tanap=tan(ap);
     cosaz=cos(azel[0]);
-    posp[0]=asin(sin(pos[0])*cos(ap)+cos(pos[0])*sinap*cosaz);
+    posp[0]=asin(sin(pos[0])*cos(ap)+cos(pos[0])*sinap*cosaz);      // (E.5.17)
     
     if ((pos[0]> 70.0*D2R&& tanap*cosaz>tan(PI/2.0-pos[0]))||
         (pos[0]<-70.0*D2R&&-tanap*cosaz>tan(PI/2.0+pos[0]))) {
-        posp[1]=pos[1]+PI-asin(sinap*sin(azel[0])/cos(posp[0]));
+        posp[1]=pos[1]+PI-asin(sinap*sin(azel[0])/cos(posp[0]));    // (E.5.18a)
     }
     else {
-        posp[1]=pos[1]+asin(sinap*sin(azel[0])/cos(posp[0]));
+        posp[1]=pos[1]+asin(sinap*sin(azel[0])/cos(posp[0]));       // (E.5.18b)
     }
-    return 1.0/sqrt(1.0-rp*rp);
+    return 1.0/sqrt(1.0-rp*rp);     // 返回倾斜率
+
+    // 可能因为后面再从 TEC 网格数据中插值时，并不需要高度信息，所以这里穿刺点位置 posp[2] 没有赋值
 }
 /* troposphere model -----------------------------------------------------------
 * compute tropospheric delay by standard atmosphere and saastamoinen model
@@ -3701,18 +3726,20 @@ extern double tropmodel(gtime_t time, const double *pos, const double *azel,
     
     if (pos[2]<-100.0||1E4<pos[2]||azel[1]<=0) return 0.0;
     
+    // 标准大气模型计算大气参数
     /* standard atmosphere */
     hgt=pos[2]<0.0?0.0:pos[2];
     
-    pres=1013.25*pow(1.0-2.2557E-5*hgt,5.2568);
-    temp=temp0-6.5E-3*hgt+273.16;
-    e=6.108*humi*exp((17.15*temp-4684.0)/(temp-38.45));
+    pres=1013.25*pow(1.0-2.2557E-5*hgt,5.2568);         // 求大气压 P (E.5.1)
+    temp=temp0-6.5E-3*hgt+273.16;                       // 求温度 temp (E.5.2)
+    e=6.108*humi*exp((17.15*temp-4684.0)/(temp-38.45)); // 求大气水汽压力 e (E.5.3)
     
+    //  saastamoninen 模型计算对流层延迟
     /* saastamoninen model */
-    z=PI/2.0-azel[1];
-    trph=0.0022768*pres/(1.0-0.00266*cos(2.0*pos[0])-0.00028*hgt/1E3)/cos(z);
-    trpw=0.002277*(1255.0/temp+0.05)*e/cos(z);
-    return trph+trpw;
+    z=PI/2.0-azel[1];                           // 求天顶角 z 卫星高度角 azel[1] 的余角
+    trph=0.0022768*pres/(1.0-0.00266*cos(2.0*pos[0])-0.00028*hgt/1E3)/cos(z);   // 干延迟
+    trpw=0.002277*(1255.0/temp+0.05)*e/cos(z);  // 湿延迟，humi 传 0 相当于不计算湿延迟
+    return trph+trpw;   // 返回干延迟+湿延迟
 }
 #ifndef IERS_MODEL
 
@@ -3841,10 +3868,12 @@ extern void antmodel(const pcv_t *pcv, const double *del, const double *azel,
     
     trace(4,"antmodel: azel=%6.1f %4.1f opt=%d\n",azel[0]*R2D,azel[1]*R2D,opt);
     
+    // 计算视线向量在 ENU 中的单位矢量 e
     e[0]=sin(azel[0])*cosel;
     e[1]=cos(azel[0])*cosel;
     e[2]=sin(azel[1]);
     
+    // 相位中心偏移(PCO)，pcv->off[i][j] 中的值来自于天线 PCV 文件
     for (i=0;i<NFREQ;i++) {
         for (j=0;j<3;j++) off[j]=pcv->off[i][j]+del[j];
         
@@ -3870,6 +3899,8 @@ extern void antmodel_s(const pcv_t *pcv, double nadir, double *dant)
     }
     trace(5,"antmodel_s: dant=%6.3f %6.3f\n",dant[0],dant[1]);
 }
+
+// 计算 ECI 下日月坐标
 /* sun and moon position in eci (ref [4] 5.1.1, 5.2.1) -----------------------*/
 static void sunmoonpos_eci(gtime_t tut, double *rsun, double *rmoon)
 {
@@ -3878,13 +3909,16 @@ static void sunmoonpos_eci(gtime_t tut, double *rsun, double *rmoon)
     
     trace(4,"sunmoonpos_eci: tut=%s\n",time_str(tut,3));
     
+    // 从2000年1月1日12时到输入时间当前
     t=timediff(tut,epoch2time(ep2000))/86400.0/36525.0;
     
+    // 天文参数计算
     /* astronomical arguments */
     ast_args(t,f);
     
+    // 黄赤交角
     /* obliquity of the ecliptic */
-    eps=23.439291-0.0130042*t;
+    eps=23.439291-0.0130042*t;  
     sine=sin(eps*D2R); cose=cos(eps*D2R);
     
     /* sun position in eci */
@@ -3916,6 +3950,8 @@ static void sunmoonpos_eci(gtime_t tut, double *rsun, double *rmoon)
         trace(5,"rmoon=%.3f %.3f %.3f\n",rmoon[0],rmoon[1],rmoon[2]);
     }
 }
+
+// 计算 ECEF 下日月坐标
 /* sun and moon position -------------------------------------------------------
 * get sun and moon position in ecef
 * args   : gtime_t tut      I   time in ut1
@@ -3932,15 +3968,19 @@ extern void sunmoonpos(gtime_t tutc, const double *erpv, double *rsun,
     double rs[3],rm[3],U[9],gmst_;
     
     trace(4,"sunmoonpos: tutc=%s\n",time_str(tutc,3));
-    
+
+    // 根据 ERP 参数计算 UT1 时间
     tut=timeadd(tutc,erpv[2]); /* utc -> ut1 */
     
+    // 调用 sunmoonpos_eci() 计算日月 ECI 坐标
     /* sun and moon position in eci */
     sunmoonpos_eci(tut,rsun?rs:NULL,rmoon?rm:NULL);
     
+    // 调用 eci2ecef() 计算 ECI 到 ECEF 的转换矩阵 U
     /* eci to ecef transformation matrix */
     eci2ecef(tutc,erpv,U,&gmst_);
     
+    // 用转换矩阵 U 将日月坐标转到 ECEF
     /* sun and moon postion in ecef */
     if (rsun ) matmul("NN",3,1,3,1.0,U,rs,0.0,rsun );
     if (rmoon) matmul("NN",3,1,3,1.0,U,rm,0.0,rmoon);

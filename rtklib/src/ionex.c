@@ -265,6 +265,8 @@ static void combtec(nav_t *nav)
     
     trace(4,"combtec : nav->nt=%d\n",nav->nt);
 }
+
+// 读取电离层 IONEX 文件
 /* read ionex tec grid file ----------------------------------------------------
 * read ionex ionospheric tec grid file
 * args   : char   *file       I   ionex tec grid file
@@ -285,19 +287,25 @@ extern void readtec(const char *file, nav_t *nav, int opt)
     
     trace(3,"readtec : file=%s\n",file);
     
+    // 如果没有 opt，释放 nav->tec，nav->ntmax 置 0
     /* clear of tec grid data option */
     if (!opt) {
         free(nav->tec); nav->tec=NULL; nav->nt=nav->ntmax=0;
     }
+
+    // 为 efile[] 开辟空间
     for (i=0;i<MAXEXFILE;i++) {
         if (!(efiles[i]=(char *)malloc(1024))) {
             for (i--;i>=0;i--) free(efiles[i]);
             return;
         }
     }
+
+    // 扩展 file 的*到 efile[]
     /* expand wild card in file path */
     n=expath(file,efiles,MAXEXFILE);
     
+    // 遍历 efile[]，以读的方式打开，调用 readionexh() 读文件头，调用 readionexb() 读文件体
     for (i=0;i<n;i++) {
         if (!(fp=fopen(efiles[i],"r"))) {
             trace(2,"ionex file open error %s\n",efiles[i]);
@@ -315,14 +323,17 @@ extern void readtec(const char *file, nav_t *nav, int opt)
     }
     for (i=0;i<MAXEXFILE;i++) free(efiles[i]);
     
+    // 调用 combtec() 合并 TEC 格网数据
     /* combine tec grid data */
     if (nav->nt>0) combtec(nav);
     
     /* P1-P2 dcb */
     for (i=0;i<MAXSAT;i++) {
+        // 存 DCB 到 nav->cbias
         nav->cbias[i][0]=CLIGHT*dcb[i]*1E-9; /* ns->m */
     }
 }
+
 /* interpolate tec grid data -------------------------------------------------*/
 static int interptec(const tec_t *tec, int k, const double *posp, double *value,
                      double *rms)
@@ -331,7 +342,7 @@ static int interptec(const tec_t *tec, int k, const double *posp, double *value,
     int i,j,n,index;
     
     trace(3,"interptec: k=%d posp=%.2f %.2f\n",k,posp[0]*R2D,posp[1]*R2D);
-    *value=*rms=0.0;
+    *value=*rms=0.0;        // 将 value和 rms所指向的值置为 0
     
     if (tec->lats[2]==0.0||tec->lons[2]==0.0) return 0;
     
@@ -345,23 +356,32 @@ static int interptec(const tec_t *tec, int k, const double *posp, double *value,
     i=(int)floor(a); a-=i;
     j=(int)floor(b); b-=j;
     
+    // 调用 dataindex() 函数分别计算这些网格点的 tec 数据在 tec.data中的下标，
+    // 按从左下到右上的顺序
+    // 从而得到这些网格点处的 TEC 值和相应误差的标准差
     /* get gridded tec data */
     for (n=0;n<4;n++) {
         if ((index=dataindex(i+(n%2),j+(n<2?0:1),k,tec->ndata))<0) continue;
         d[n]=tec->data[index];
         r[n]=tec->rms [index];
     }
+
+    // 穿刺点位于网格内，使用双线性插值计算出穿刺点的 TEC 值
     if (d[0]>0.0&&d[1]>0.0&&d[2]>0.0&&d[3]>0.0) {
         
         /* bilinear interpolation (inside of grid) */
         *value=(1.0-a)*(1.0-b)*d[0]+a*(1.0-b)*d[1]+(1.0-a)*b*d[2]+a*b*d[3];
         *rms  =(1.0-a)*(1.0-b)*r[0]+a*(1.0-b)*r[1]+(1.0-a)*b*r[2]+a*b*r[3];
     }
+
+    // 穿刺点不位于网格内，使用最邻近的网格点值作为穿刺点的 TEC 值，不过前提是网格点的 TEC>0
     /* nearest-neighbour extrapolation (outside of grid) */
     else if (a<=0.5&&b<=0.5&&d[0]>0.0) {*value=d[0]; *rms=r[0];}
     else if (a> 0.5&&b<=0.5&&d[1]>0.0) {*value=d[1]; *rms=r[1];}
     else if (a<=0.5&&b> 0.5&&d[2]>0.0) {*value=d[2]; *rms=r[2];}
     else if (a> 0.5&&b> 0.5&&d[3]>0.0) {*value=d[3]; *rms=r[3];}
+
+    // 否则，选用四个网格点中 >0 的值的平均值作为穿刺点的 TEC 值
     else {
         i=0;
         for (n=0;n<4;n++) if (d[n]>0.0) {i++; *value+=d[n]; *rms+=r[n];}
@@ -370,6 +390,8 @@ static int interptec(const tec_t *tec, int k, const double *posp, double *value,
     }
     return 1;
 }
+
+// 计算指定时间电离层延迟
 /* ionosphere delay by tec grid data -----------------------------------------*/
 static int iondelay(gtime_t time, const tec_t *tec, const double *pos,
                     const double *azel, int opt, double *delay, double *var)
@@ -387,18 +409,24 @@ static int iondelay(gtime_t time, const tec_t *tec, const double *pos,
         
         hion=tec->hgts[0]+tec->hgts[2]*i;
         
+        // 调用 ionppp() 函数，计算当前电离层高度，穿刺点的位置 {lat,lon,h} (rad,m)和倾斜率
         /* ionospheric pierce point position */
         fs=ionppp(pos,azel,tec->rb,hion,posp);
         
+        // 按照 M-SLM 映射函数重新计算倾斜率
         if (opt&2) {
             /* modified single layer mapping function (M-SLM) ref [2] */
             rp=tec->rb/(tec->rb+hion)*sin(0.9782*(PI/2.0-azel[1]));
             fs=1.0/sqrt(1.0-rp*rp);
         }
+
+        // 在日固系中考虑地球自转，重新计算穿刺点经度
         if (opt&1) {
             /* earth rotation correction (sun-fixed coordinate) */
             posp[1]+=2.0*PI*timediff(time,tec->time)/86400.0;
         }
+
+        // 调用 interptec() 格网插值获取 vtec
         /* interpolate tec grid data */
         if (!interptec(tec,i,posp,&vtec,&rms)) return 0;
         
@@ -409,6 +437,8 @@ static int iondelay(gtime_t time, const tec_t *tec, const double *pos,
     
     return 1;
 }
+
+// TEC 格网改正入口函数
 /* ionosphere model by tec grid data -------------------------------------------
 * compute ionospheric delay by tec grid data
 * args   : gtime_t time     I   time (gpst)
@@ -433,36 +463,48 @@ extern int iontec(gtime_t time, const nav_t *nav, const double *pos,
     trace(3,"iontec  : time=%s pos=%.1f %.1f azel=%.1f %.1f\n",time_str(time,0),
           pos[0]*R2D,pos[1]*R2D,azel[0]*R2D,azel[1]*R2D);
     
+    // 检测高度角和接收机高度是否大于阈值
     if (azel[1]<MIN_EL||pos[2]<MIN_HGT) {
         *delay=0.0;
         *var=VAR_NOTEC;
         return 1;
     }
+
+    // 从 nav_t.tec 中找出第一个 tec[i].time>time 信号接收时间
     for (i=0;i<nav->nt;i++) {
         if (timediff(nav->tec[i].time,time)>0.0) break;
     }
+
+    // 确保 time 是在所给出的 nav_t.tec 包含的时间段之中
     if (i==0||i>=nav->nt) {
         trace(2,"%s: tec grid out of period\n",time_str(time,0));
         return 0;
     }
+
+    // 通过确认所找到的时间段的右端点减去左端点，来确保时间间隔 != 0
     if ((tt=timediff(nav->tec[i].time,nav->tec[i-1].time))==0.0) {
         trace(2,"tec grid time interval error\n");
         return 0;
     }
+
+    // 调用 iondelay() 来计算所属时间段两端端点的电离层延时
     /* ionospheric delay by tec grid data */
     stat[0]=iondelay(time,nav->tec+i-1,pos,azel,opt,dels  ,vars  );
     stat[1]=iondelay(time,nav->tec+i  ,pos,azel,opt,dels+1,vars+1);
     
-    if (!stat[0]&&!stat[1]) {
+    // 由两端的延时，插值计算出观测时间点处的值
+    if (!stat[0]&&!stat[1]) {       // 两个端点都计算出错，输出错误信息，返回 0
         trace(2,"%s: tec grid out of area pos=%6.2f %7.2f azel=%6.1f %5.1f\n",
               time_str(time,0),pos[0]*R2D,pos[1]*R2D,azel[0]*R2D,azel[1]*R2D);
         return 0;
     }
+    // 两个端点都有值，线性插值出观测时间点的值，返回 1
     if (stat[0]&&stat[1]) { /* linear interpolation by time */
         a=timediff(time,nav->tec[i-1].time)/tt;
         *delay=dels[0]*(1.0-a)+dels[1]*a;
         *var  =vars[0]*(1.0-a)+vars[1]*a;
     }
+    // 只有一个端点有值，将其结果作为观测时间处的值，返回 1
     else if (stat[0]) { /* nearest-neighbour extrapolation by time */
         *delay=dels[0];
         *var  =vars[0];

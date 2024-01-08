@@ -266,13 +266,13 @@ extern void eph2pos(gtime_t time, const eph_t *eph, double *rs, double *dts,
     trace(4,"kepler: sat=%2d e=%8.5f n=%2d del=%10.3e\n",eph->sat,eph->e,n,E-Ek);
     
     // 计算摄动改正后的升交点角距 u 卫星矢径长度 r 轨道倾角 i
-    u=atan2(sqrt(1.0-eph->e*eph->e)*sinE,cosE-eph->e)+eph->omg;
-    r=eph->A*(1.0-eph->e*cosE);
-    i=eph->i0+eph->idot*tk;
-    sin2u=sin(2.0*u); cos2u=cos(2.0*u);
-    u+=eph->cus*sin2u+eph->cuc*cos2u;
-    r+=eph->crs*sin2u+eph->crc*cos2u;
-    i+=eph->cis*sin2u+eph->cic*cos2u;
+    u=atan2(sqrt(1.0-eph->e*eph->e)*sinE,cosE-eph->e)+eph->omg;     // (E.4.5) (E.4.6) (E.4.10)
+    r=eph->A*(1.0-eph->e*cosE);             // (E.4.11)
+    i=eph->i0+eph->idot*tk;                 // (E.4.12)
+    sin2u=sin(2.0*u); cos2u=cos(2.0*u);     
+    u+=eph->cus*sin2u+eph->cuc*cos2u;       // (E.4.7)
+    r+=eph->crs*sin2u+eph->crc*cos2u;       // (E.4.8)
+    i+=eph->cis*sin2u+eph->cic*cos2u;       // (E.4.9)
     x=r*cos(u); y=r*sin(u); cosi=cos(i);
     
     // 北斗的 MEO、IGSO 卫星计算方法与 GPS, Galileo and QZSS 相同，只是一些参数不同
@@ -285,32 +285,41 @@ extern void eph2pos(gtime_t time, const eph_t *eph, double *rs, double *dts,
         yg=x*sinO+y*cosi*cosO;
         zg=y*sin(i);
         sino=sin(omge*tk); coso=cos(omge*tk);
-        rs[0]= xg*coso+yg*sino*COS_5+zg*sino*SIN_5;
+        rs[0]= xg*coso+yg*sino*COS_5+zg*sino*SIN_5; // ECEF位置(E.4.30)
         rs[1]=-xg*sino+yg*coso*COS_5+zg*coso*SIN_5;
         rs[2]=-yg*SIN_5+zg*COS_5;
     }
     else {
-        O=eph->OMG0+(eph->OMGd-omge)*tk-omge*eph->toes;
+        O=eph->OMG0+(eph->OMGd-omge)*tk-omge*eph->toes; // 计算升交点赤经O (E.4.13)
         sinO=sin(O); cosO=cos(O);
-        rs[0]=x*cosO-y*cosi*sinO;
+        rs[0]=x*cosO-y*cosi*sinO;       // 计算卫星ECEF位置存入 rs 中 (E.4.14)
         rs[1]=x*sinO+y*cosi*cosO;
         rs[2]=y*sin(i);
     }
-    tk=timediff(time,eph->toc);
-    *dts=eph->f0+eph->f1*tk+eph->f2*tk*tk;
+    tk=timediff(time,eph->toc);             // (E.4.15)
+    *dts=eph->f0+eph->f1*tk+eph->f2*tk*tk;  // 利用三个二项式模型系数 af0、af1、af2 计算卫星钟差
     
-    /* relativity correction */
+    /* relativity correction */         // 相对论效应改正卫星钟差
     *dts-=2.0*sqrt(mu*eph->A)*eph->e*sinE/SQR(CLIGHT);
     
     /* position and clock error variance */
-    *var=var_uraeph(sys,eph->sva);
+    *var=var_uraeph(sys,eph->sva);      //用 URA 值来标定方差
 }
-/* glonass orbit differential equations --------------------------------------*/
+
+// GLONASS 轨道微分方程，xdot[3]:dvx/dt，xdot[4]:dvy/dt
+/* glonass orbit differential equations --------------------------------------
+ * args:x[6]    I   上一次计算时卫星位置速度
+ *      xdot[6] O   差分方程
+ *      acc[3]  I   加速度
+ ----------------------------------------------------------------------------*/
 static void deq(const double *x, double *xdot, const double *acc)
 {
-    double a,b,c,r2=dot(x,x,3),r3=r2*sqrt(r2),omg2=SQR(OMGE_GLO);
+    double a,b,c,
+        r2=dot(x,x,3),          // r平方
+        r3=r2*sqrt(r2),         // r三次方
+        omg2=SQR(OMGE_GLO);     // omg平方
     
-    if (r2<=0.0) {
+    if (r2<=0.0) {      // 计算出错
         xdot[0]=xdot[1]=xdot[2]=xdot[3]=xdot[4]=xdot[5]=0.0;
         return;
     }
@@ -318,11 +327,13 @@ static void deq(const double *x, double *xdot, const double *acc)
     a=1.5*J2_GLO*MU_GLO*SQR(RE_GLO)/r2/r3; /* 3/2*J2*mu*Ae^2/r^5 */
     b=5.0*x[2]*x[2]/r2;                    /* 5*z^2/r^2 */
     c=-MU_GLO/r3-a*(1.0-b);                /* -mu/r^3-a(1-b) */
-    xdot[0]=x[3]; xdot[1]=x[4]; xdot[2]=x[5];
-    xdot[3]=(c+omg2)*x[0]+2.0*OMGE_GLO*x[4]+acc[0];
-    xdot[4]=(c+omg2)*x[1]-2.0*OMGE_GLO*x[3]+acc[1];
-    xdot[5]=(c-2.0*a)*x[2]+acc[2];
+    xdot[0]=x[3]; xdot[1]=x[4]; xdot[2]=x[5];           // (E.4.22)
+    xdot[3]=(c+omg2)*x[0]+2.0*OMGE_GLO*x[4]+acc[0];     // (E.4.23)
+    xdot[4]=(c+omg2)*x[1]-2.0*OMGE_GLO*x[3]+acc[1];     // (E.4.24)
+    xdot[5]=(c-2.0*a)*x[2]+acc[2];                      // (E.4.25)
 }
+
+// 数值积分计算 GLONASS 位置、速度
 /* glonass position and velocity by numerical integration --------------------*/
 static void glorbit(double t, double *x, const double *acc)
 {
@@ -352,7 +363,7 @@ extern double geph2clk(gtime_t time, const geph_t *geph)
     t=ts=timediff(time,geph->toe);
     
     for (i=0;i<2;i++) {
-        t=ts-(-geph->taun+geph->gamn*t);
+        t=ts-(-geph->taun+geph->gamn*t);    // (E.4.26)
     }
     return -geph->taun+geph->gamn*t;
 }
@@ -377,18 +388,21 @@ extern void geph2pos(gtime_t time, const geph_t *geph, double *rs, double *dts,
     
     t=timediff(time,geph->toe);
     
-    *dts=-geph->taun+geph->gamn*t;
+    *dts=-geph->taun+geph->gamn*t;      // 计算钟差dts(E.4.26)
     
     for (i=0;i<3;i++) {
         x[i  ]=geph->pos[i];
         x[i+3]=geph->vel[i];
     }
+
+    // 步长 TSTEP：60s
     for (tt=t<0.0?-TSTEP:TSTEP;fabs(t)>1E-9;t-=tt) {
         if (fabs(t)<TSTEP) tt=t;
         glorbit(tt,x,geph->acc);
     }
     for (i=0;i<3;i++) rs[i]=x[i];
     
+    // GLONASS 卫星的方差直接定为 5*5
     *var=SQR(ERREPH_GLO);
 }
 
@@ -408,8 +422,8 @@ extern double seph2clk(gtime_t time, const seph_t *seph)
     
     t=timediff(time,seph->t0);
     
-    for (i=0;i<2;i++) {
-        t-=seph->af0+seph->af1*t;
+    for (i=0;i<2;i++) {             // 由参数 af0/af1，钟差校正
+        t-=seph->af0+seph->af1*t;   // (E.4.33)
     }
     return seph->af0+seph->af1*t;
 }
@@ -433,13 +447,15 @@ extern void seph2pos(gtime_t time, const seph_t *seph, double *rs, double *dts,
     
     t=timediff(time,seph->t0);
     
-    for (i=0;i<3;i++) {
+    for (i=0;i<3;i++) {             // 由位置，速度，加速度计算位置 (E.4.32)
         rs[i]=seph->pos[i]+seph->vel[i]*t+seph->acc[i]*t*t/2.0;
     }
-    *dts=seph->af0+seph->af1*t;
+    *dts=seph->af0+seph->af1*t;     // 钟差 (E.4.33)
     
     *var=var_uraeph(SYS_SBS,seph->sva);
 }
+
+// 传入 sattle number，时间或 IDOE，如果传入 IDOE>=0，按 IDOE 找星历数据，否则取最接近时间的星历
 /* select ephememeris --------------------------------------------------------*/
 static eph_t *seleph(gtime_t time, int sat, int iode, const nav_t *nav)
 {
@@ -448,6 +464,7 @@ static eph_t *seleph(gtime_t time, int sat, int iode, const nav_t *nav)
     
     trace(4,"seleph  : time=%s sat=%2d iode=%d\n",time_str(time,3),sat,iode);
     
+    // 根据传入的 sattle number，调用 satsys() 判断卫星系统，赋值 tmax，tmin，sel
     sys=satsys(sat,NULL);
     switch (sys) {
         case SYS_GPS: tmax=MAXDTOE+1.0    ; sel=eph_sel[0]; break;
@@ -459,18 +476,21 @@ static eph_t *seleph(gtime_t time, int sat, int iode, const nav_t *nav)
     }
     tmin=tmax+1.0;
     
+    // 遍历 nav->eph[]
     for (i=0;i<nav->n;i++) {
-        if (nav->eph[i].sat!=sat) continue;
-        if (iode>=0&&nav->eph[i].iode!=iode) continue;
+        if (nav->eph[i].sat!=sat) continue;                 // eph[i] 不是需要的卫星，进入下一次循环
+        if (iode>=0&&nav->eph[i].iode!=iode) continue;      // 如果传入了 idoe 时间不符合，也进行下一次循环
+        
+        // 若是伽利略卫星还要判断是 I/NAV、F/NAV
         if (sys==SYS_GAL) {
             sel=getseleph(SYS_GAL);
             if (sel==0&&!(nav->eph[i].code&(1<<9))) continue; /* I/NAV */
             if (sel==1&&!(nav->eph[i].code&(1<<8))) continue; /* F/NAV */
             if (timediff(nav->eph[i].toe,time)>=0.0) continue; /* AOD<=0 */
         }
-        if ((t=fabs(timediff(nav->eph[i].toe,time)))>tmax) continue;
-        if (iode>=0) return nav->eph+i;
-        if (t<=tmin) {j=i; tmin=t;} /* toe closest to time */
+        if ((t=fabs(timediff(nav->eph[i].toe,time)))>tmax) continue;    // 时间差过大，也进行下一次循化
+        if (iode>=0) return nav->eph+i;                                 // 传入IDOE>=0，直接返回符合条件的星历
+        if (t<=tmin) {j=i; tmin=t;} /* toe closest to time */           // 存下时间差最小的星历下标和时间差
     }
     if (iode>=0||j<0) {
         trace(3,"no broadcast ephemeris: %s sat=%2d iode=%3d\n",
@@ -488,11 +508,11 @@ static geph_t *selgeph(gtime_t time, int sat, int iode, const nav_t *nav)
     trace(4,"selgeph : time=%s sat=%2d iode=%2d\n",time_str(time,3),sat,iode);
     
     for (i=0;i<nav->ng;i++) {
-        if (nav->geph[i].sat!=sat) continue;
-        if (iode>=0&&nav->geph[i].iode!=iode) continue;
-        if ((t=fabs(timediff(nav->geph[i].toe,time)))>tmax) continue;
-        if (iode>=0) return nav->geph+i;
-        if (t<=tmin) {j=i; tmin=t;} /* toe closest to time */
+        if (nav->geph[i].sat!=sat) continue;                            // 卫星不同，进行下一次循环
+        if (iode>=0&&nav->geph[i].iode!=iode) continue;                 // 传入 IDOE>0，IDOE 不同，进行下一次循环
+        if ((t=fabs(timediff(nav->geph[i].toe,time)))>tmax) continue;   
+        if (iode>=0) return nav->geph+i;                                // 传入IDOE>=0，直接返回符合条件的星历
+        if (t<=tmin) {j=i; tmin=t;} /* toe closest to time */           // 存下时间差最小的星历下标和时间差
     }
     if (iode>=0||j<0) {
         trace(3,"no glonass ephemeris  : %s sat=%2d iode=%2d\n",time_str(time,0),
@@ -520,7 +540,16 @@ static seph_t *selseph(gtime_t time, int sat, const nav_t *nav)
     }
     return nav->seph+j;
 }
-/* satellite clock with broadcast ephemeris ----------------------------------*/
+
+// 通过广播星历来确定卫星钟差
+/* satellite clock with broadcast ephemeris ----------------------------------
+ * arge:gtime_t  time      I   信号发射时刻
+ *      gtime_t  teph      I   用于选择星历的时刻 (gpst)
+ *      int      sat       I   卫星号 (1-MAXSAT)
+ *      nav_t    *nav      I   导航数据
+ *      double   *dts      O   卫星钟差，长度为2*n， {bias,drift} (s|s/s)
+ * return:(1:ok,0:error)
+----------------------------------------------------------------------------*/
 static int ephclk(gtime_t time, gtime_t teph, int sat, const nav_t *nav,
                   double *dts)
 {
@@ -530,11 +559,14 @@ static int ephclk(gtime_t time, gtime_t teph, int sat, const nav_t *nav,
     int sys;
     
     trace(4,"ephclk  : time=%s sat=%2d\n",time_str(time,3),sat);
-    
+
+    //调用 satsys() 函数，根据卫星编号确定该卫星所属的导航系统和该卫星在该系统中的 PRN编号
     sys=satsys(sat,NULL);
     
     if (sys==SYS_GPS||sys==SYS_GAL||sys==SYS_QZS||sys==SYS_CMP||sys==SYS_IRN) {
+        // 调用 seleph() 函数来选择最接近 teph 的那个星
         if (!(eph=seleph(teph,sat,-1,nav))) return 0;
+        // 调用 eph2clk() 函数，通过广播星历和信号发射时间计算出卫星钟差
         *dts=eph2clk(time,eph);
     }
     else if (sys==SYS_GLO) {
@@ -549,7 +581,22 @@ static int ephclk(gtime_t time, gtime_t teph, int sat, const nav_t *nav,
     
     return 1;
 }
-/* satellite position and clock by broadcast ephemeris -----------------------*/
+
+// 根据卫星系统，先调用对应的星历选择函数，seleph()、selgeph()、seph2pos()；
+// 再调用对应的解算函数，eph2pos()、geph2pos()、seph2pos()计算位置、钟差
+// 增加一个极短的时间tt，再调用对应的解算函数计算位置、钟差两次的位置、钟差相减再除以tt，得速度、钟漂
+/* satellite position and clock by broadcast ephemeris -----------------------
+ * arge:gtime_t  time      I   信号发射时刻
+ *      gtime_t  teph      I   用于选择星历的时刻 (gpst)
+ *      int      sat       I   卫星号 (1-MAXSAT)
+ *      nav_t    *nav      I   导航数据
+ *      int      iode      I   星历数据期号
+ *      double   *rs       O   卫星位置和速度，长度为6*n，{x,y,z,vx,vy,vz}(ecef)(m,m/s)
+ *      double   *dts      O   卫星钟差，长度为2*n， {bias,drift} (s|s/s)
+ *      double   *var      O   卫星位置和钟差的协方差 (m^2)
+ *      int      *svh      O   卫星健康标志 (-1:correction not available)
+ * return:(1:ok,0:error)
+----------------------------------------------------------------------------*/
 static int ephpos(gtime_t time, gtime_t teph, int sat, const nav_t *nav,
                   int iode, double *rs, double *dts, double *var, int *svh)
 {
@@ -567,7 +614,9 @@ static int ephpos(gtime_t time, gtime_t teph, int sat, const nav_t *nav,
     *svh=-1;
     
     if (sys==SYS_GPS||sys==SYS_GAL||sys==SYS_QZS||sys==SYS_CMP||sys==SYS_IRN) {
+        // 调用 seleph() 函数来选择广播星历
         if (!(eph=seleph(teph,sat,iode,nav))) return 0;
+        // 根据选中的广播星历，调用 eph2pos() 函数来计算信号发射时刻卫星的位置、钟差和相应结果的误差
         eph2pos(time,eph,rs,dts,var);
         time=timeadd(time,tt);
         eph2pos(time,eph,rst,dtst,var);
@@ -591,8 +640,8 @@ static int ephpos(gtime_t time, gtime_t teph, int sat, const nav_t *nav,
     
     // 在信号发射时刻的基础上给定一个微小的时间间隔，再次计算新时刻的 P、V、C
     /* satellite velocity and clock drift by differential approx */
-    for (i=0;i<3;i++) rs[i+3]=(rst[i]-rs[i])/tt;
-    dts[1]=(dtst[0]-dts[0])/tt;
+    for (i=0;i<3;i++) rs[i+3]=(rst[i]-rs[i])/tt;    // 卫星速度 rs[i+3]
+    dts[1]=(dtst[0]-dts[0])/tt;                     // 钟漂 dts[1]
     
     return 1;
 }
@@ -605,17 +654,22 @@ static int satpos_sbas(gtime_t time, gtime_t teph, int sat, const nav_t *nav,
     
     trace(4,"satpos_sbas: time=%s sat=%2d\n",time_str(time,3),sat);
     
-    /* search sbas satellite correciton */
+    // 寻找要计算卫星对应的SBAS信息
+    /* search sbas satellite correciton */      
     for (i=0;i<nav->sbssat.nsat;i++) {
         sbs=nav->sbssat.sat+i;
         if (sbs->sat==sat) break;
     }
-    if (i>=nav->sbssat.nsat) {
+
+    // 找不到，则 svh 写 -1，只调用 ephpos() 用广播星历计算卫星位置
+    if (i>=nav->sbssat.nsat) {                  
         trace(2,"no sbas correction for orbit: %s sat=%2d\n",time_str(time,0),sat);
         ephpos(time,teph,sat,nav,-1,rs,dts,var,svh);
         *svh=-1;
         return 0;
     }
+
+    // 用广播星历计算卫星位置
     /* satellite postion and clock by broadcast ephemeris */
     if (!ephpos(time,teph,sat,nav,sbs->lcorr.iode,rs,dts,var,svh)) return 0;
     

@@ -57,37 +57,37 @@
 #define MIN(x,y)    ((x)<=(y)?(x):(y))
 #define ROUND(x)    (int)floor((x)+0.5)
 
-#define VAR_POS     SQR(30.0) /* initial variance of receiver pos (m^2) */
-#define VAR_VEL     SQR(10.0) /* initial variance of receiver vel ((m/s)^2) */
-#define VAR_ACC     SQR(10.0) /* initial variance of receiver acc ((m/ss)^2) */
-#define VAR_HWBIAS  SQR(1.0)  /* initial variance of h/w bias ((m/MHz)^2) */
-#define VAR_GRA     SQR(0.001) /* initial variance of gradient (m^2) */
-#define INIT_ZWD    0.15     /* initial zwd (m) */
+#define VAR_POS     SQR(30.0)   /* 初始位置方差 (m^2) */
+#define VAR_VEL     SQR(10.0)   /* 初始速度方差 ((m/s)^2) */
+#define VAR_ACC     SQR(10.0)   /* 初始加速度方差 ((m/ss)^2) */
+#define VAR_HWBIAS  SQR(1.0)    /* 初始 h/w 方差 ((m/MHz)^2) */
+#define VAR_GRA     SQR(0.001)  /* initial variance of gradient (m^2) */
+#define INIT_ZWD    0.15        /* initial zwd (m) */
 
-#define PRN_HWBIAS  1E-6     /* process noise of h/w bias (m/MHz/sqrt(s)) */
-#define GAP_RESION  120      /* gap to reset ionosphere parameters (epochs) */
-#define MAXACC      30.0     /* max accel for doppler slip detection (m/s^2) */
+#define PRN_HWBIAS  1E-6        /* process noise of h/w bias (m/MHz/sqrt(s)) */
+#define GAP_RESION  120         /* gap to reset ionosphere parameters (epochs) */
+#define MAXACC      30.0        /* max accel for doppler slip detection (m/s^2) */
 
-#define VAR_HOLDAMB 0.001    /* constraint to hold ambiguity (cycle^2) */
+#define VAR_HOLDAMB 0.001       /* constraint to hold ambiguity (cycle^2) */
 
-#define TTOL_MOVEB  (1.0+2*DTTOL)
-                             /* time sync tolerance for moving-baseline (s) */
+#define TTOL_MOVEB  (1.0+2*DTTOL)   /* time sync tolerance for moving-baseline (s) */
+                             
 
 /* number of parameters (pos,ionos,tropos,hw-bias,phase-bias,real,estimated) */
-#define NF(opt)     ((opt)->ionoopt==IONOOPT_IFLC?1:(opt)->nf)
-#define NP(opt)     ((opt)->dynamics==0?3:9)
-#define NI(opt)     ((opt)->ionoopt!=IONOOPT_EST?0:MAXSAT)
-#define NT(opt)     ((opt)->tropopt<TROPOPT_EST?0:((opt)->tropopt<TROPOPT_ESTG?2:6))
-#define NL(opt)     ((opt)->glomodear!=2?0:NFREQGLO)
-#define NB(opt)     ((opt)->mode<=PMODE_DGPS?0:MAXSAT*NF(opt))
-#define NR(opt)     (NP(opt)+NI(opt)+NT(opt)+NL(opt))
-#define NX(opt)     (NR(opt)+NB(opt))
+#define NF(opt)     ((opt)->ionoopt==IONOOPT_IFLC?1:(opt)->nf)  // 频率参数数量，一般为解算频率数，消电离层组合为 1
+#define NP(opt)     ((opt)->dynamics==0?3:9)                    // 位置参数数量，一般为 3，动力学模式估计速度加速度为 9
+#define NI(opt)     ((opt)->ionoopt!=IONOOPT_EST?0:MAXSAT)      // 电离层参数数量，估计 STEC 为卫星数，否则为 0
+#define NT(opt)     ((opt)->tropopt<TROPOPT_EST?0:((opt)->tropopt<TROPOPT_ESTG?2:6))    // 对流层参数数量，不估计对流层为 0，估计对流层为 2 (基准站、流动站各一个)，估计对流层梯度为 6
+#define NL(opt)     ((opt)->glomodear!=2?0:NFREQGLO)            // GLONASS 频间偏差数量
+#define NB(opt)     ((opt)->mode<=PMODE_DGPS?0:MAXSAT*NF(opt))  // 模糊度参数数量
+#define NR(opt)     (NP(opt)+NI(opt)+NT(opt)+NL(opt))           // 除模糊度外参数数量：位置参数NP(opt)+电离层估计参数NI(opt)+对流层参数NT(opt)+GLONASS AR参数NL(opt)
+#define NX(opt)     (NR(opt)+NB(opt))                           // 总参数数量
 
 /* state variable index */
-#define II(s,opt)   (NP(opt)+(s)-1)                 /* ionos (s:satellite no) */
-#define IT(r,opt)   (NP(opt)+NI(opt)+NT(opt)/2*(r)) /* tropos (r:0=rov,1:ref) */
+#define II(s,opt)   (NP(opt)+(s)-1)                 /* 电离层参数下标 (s:satellite no) */
+#define IT(r,opt)   (NP(opt)+NI(opt)+NT(opt)/2*(r)) /* 对流层参数下标 (r:0=rov,1:ref) */
 #define IL(f,opt)   (NP(opt)+NI(opt)+NT(opt)+(f))   /* receiver h/w bias */
-#define IB(s,f,opt) (NR(opt)+MAXSAT*(f)+(s)-1) /* phase bias (s:satno,f:freq) */
+#define IB(s,f,opt) (NR(opt)+MAXSAT*(f)+(s)-1)      /* 模糊度参数下标 (s:satno,f:freq) */
 
 /* global variables ----------------------------------------------------------*/
 static int statlevel=0;          /* rtk status output level (0:off) */
@@ -95,6 +95,7 @@ static FILE *fp_stat=NULL;       /* rtk status file pointer */
 static char file_stat[1024]="";  /* rtk status file original path */
 static gtime_t time_stat={0};    /* rtk status file time */
 
+// 创建解算状态文件，设置输出等级
 /* open solution status file ---------------------------------------------------
 * open solution status file and set output level
 * args   : char     *file   I   rtk status file
@@ -184,6 +185,8 @@ extern int rtkopenstat(const char *file, int level)
     statlevel=level;
     return 1;
 }
+
+// 关闭解算状态文件
 /* close solution status file --------------------------------------------------
 * close solution status file
 * args   : none
@@ -198,6 +201,8 @@ extern void rtkclosestat(void)
     file_stat[0]='\0';
     statlevel=0;
 }
+
+// 写解算状态到缓冲区（解算失败不输出）
 /* write solution status to buffer -------------------------------------------*/
 extern int rtkoutstat(rtk_t *rtk, char *buff)
 {
@@ -209,6 +214,7 @@ extern int rtkoutstat(rtk_t *rtk, char *buff)
     if (rtk->sol.stat<=SOLQ_NONE) {
         return 0;
     }
+    // 如果结果状态为 SOLQ_NONE，直接 return 0，不输出
     /* write ppp solution status to buffer */
     if (rtk->opt.mode>=PMODE_PPP_KINEMA) {
         return pppoutstat(rtk,buff);
@@ -285,12 +291,14 @@ extern int rtkoutstat(rtk_t *rtk, char *buff)
     }
     return (int)(p-buff);
 }
+// 根据时间拆分解算状态文件
 /* swap solution status file -------------------------------------------------*/
 static void swapsolstat(void)
 {
-    gtime_t time=utc2gpst(timeget());
+    gtime_t time=utc2gpst(timeget());   // 获取当前系统时间 time
     char path[1024];
     
+    // 如果当前系统时间周内秒与 time_stat 差距小于 1 天，直接 return
     if ((int)(time2gpst(time     ,NULL)/INT_SWAP_STAT)==
         (int)(time2gpst(time_stat,NULL)/INT_SWAP_STAT)) {
         return;
@@ -363,6 +371,8 @@ static void errmsg(rtk_t *rtk, const char *format, ...)
     rtk->neb+=n;
     trace(2,"%s",buff);
 }
+
+// 计算单差伪距观测值，i 是基准站下标、j 是流动站下标、k 是选择的频率
 /* single-differenced observable ---------------------------------------------*/
 static double sdobs(const obsd_t *obs, int i, int j, int k)
 {
@@ -370,6 +380,7 @@ static double sdobs(const obsd_t *obs, int i, int j, int k)
     double pj=(k<NFREQ)?obs[j].L[k]:obs[j].P[k-NFREQ];
     return pi==0.0||pj==0.0?0.0:pi-pj;
 }
+// 计算单差频率 GF 组合观测值，i 是基准站下标、j 是流动站下标、k 是选择的频率
 /* single-differenced geometry-free linear combination of phase --------------*/
 static double gfobs(const obsd_t *obs, int i, int j, int k, const nav_t *nav)
 {
@@ -382,6 +393,7 @@ static double gfobs(const obsd_t *obs, int i, int j, int k, const nav_t *nav)
     if (freq1==0.0||freq2==0.0||L1==0.0||L2==0.0) return 0.0;
     return L1*CLIGHT/freq1-L2*CLIGHT/freq2;
 }
+// 单差量测方差
 /* single-differenced measurement error variance -----------------------------*/
 static double varerr(int sat, int sys, double el, double bl, double dt, int f,
                      const prcopt_t *opt)
@@ -398,6 +410,7 @@ static double varerr(int sat, int sys, double el, double bl, double dt, int f,
     
     return 2.0*(opt->ionoopt==IONOOPT_IFLC?3.0:1.0)*(a*a+b*b/sinel/sinel+c*c)+d*d;
 }
+// 求基线长度，流动站坐标减基准站坐标再取模
 /* baseline length -----------------------------------------------------------*/
 static double baseline(const double *ru, const double *rb, double *dr)
 {
@@ -405,15 +418,20 @@ static double baseline(const double *ru, const double *rb, double *dr)
     for (i=0;i<3;i++) dr[i]=ru[i]-rb[i];
     return norm(dr,3);
 }
+
+// 赋值 xi、var、给rtk->x[i]，rtk->P[i,i]，rtk->P[i] 上非对角线元素赋 0
 /* initialize state and covariance -------------------------------------------*/
 static void initx(rtk_t *rtk, double xi, double var, int i)
 {
     int j;
-    rtk->x[i]=xi;
-    for (j=0;j<rtk->nx;j++) {
+    rtk->x[i]=xi;               // 赋值 rtk->x[i]
+    for (j=0;j<rtk->nx;j++) {   // 遍历 rtk->P[i]，对角线上元素赋方差，对角线外原始赋 0
         rtk->P[i+j*rtk->nx]=rtk->P[j+i*rtk->nx]=i==j?var:0.0;
     }
 }
+
+// 选择基准站、流动站间的共视卫星，返回共同观测的卫星个数 ns，输出卫星号列表 sat
+// 在接收机观测值中的下标值列表 iu 和在基站观测值中的下标值列表 ir
 /* select common satellites between rover and reference station --------------*/
 static int selsat(const obsd_t *obs, double *azel, int nu, int nr,
                   const prcopt_t *opt, int *sat, int *iu, int *ir)
@@ -432,6 +450,8 @@ static int selsat(const obsd_t *obs, double *azel, int nu, int nr,
     }
     return k;
 }
+
+// 位置参数时间更新
 /* temporal update of position/velocity/acceleration -------------------------*/
 static void udpos(rtk_t *rtk, double tt)
 {
@@ -440,11 +460,14 @@ static void udpos(rtk_t *rtk, double tt)
     
     trace(3,"udpos   : tt=%.3f\n",tt);
     
+    // 若为 PMODE_FIXED 模式，直接从选项中取得位置值给 rtk->x，然后返回
     /* fixed mode */
     if (rtk->opt.mode==PMODE_FIXED) {
         for (i=0;i<3;i++) initx(rtk,rtk->opt.ru[i],1E-8,i);
         return;
     }
+
+    // 若为第一个历元，用 rtk->sol 中的单点定位解初始化 rtk->x，方差设为 VAR_POS(30*30)
     /* initialize position for first epoch */
     if (norm(rtk->x,3)<=0.0) {
         for (i=0;i<3;i++) initx(rtk,rtk->sol.rr[i],VAR_POS,i);
@@ -453,14 +476,18 @@ static void udpos(rtk_t *rtk, double tt)
             for (i=6;i<9;i++) initx(rtk,1E-6,VAR_ACC,i);
         }
     }
+    // 若为 PMODE_STATIC 模式，不改变协方差阵直接 return
     /* static mode */
     if (rtk->opt.mode==PMODE_STATIC) return;
     
+    // 若非 dynamics 模式，用 rtk->sol 中的位置值初始化 rtk->x，方差设为 VAR_POS(30*30)
     /* kinmatic mode without dynamics */
     if (!rtk->opt.dynamics) {
         for (i=0;i<3;i++) initx(rtk,rtk->sol.rr[i],VAR_POS,i);
         return;
     }
+
+    // 检查位置协方差，若大于阈值 VAR_POS 则用 rtk->sol 中的单点解重置 rtk->x
     /* check variance of estimated postion */
     for (i=0;i<3;i++) var+=rtk->P[i+i*rtk->nx];
     var/=3.0;
@@ -473,6 +500,8 @@ static void udpos(rtk_t *rtk, double tt)
         trace(2,"reset rtk position due to large variance: var=%.3f\n",var);
         return;
     }
+
+    // 生成有效状态量(非0)下标 ix[]
     /* generate valid state index */
     ix=imat(rtk->nx,1);
     for (i=nx=0;i<rtk->nx;i++) {
@@ -482,6 +511,8 @@ static void udpos(rtk_t *rtk, double tt)
         free(ix);
         return;
     }
+
+    // 构建状态转移矩阵 F
     /* state transition of position/velocity/acceleration */
     F=eye(nx); P=mat(nx,nx); FP=mat(nx,nx); x=mat(nx,1); xp=mat(nx,1);
     
@@ -491,12 +522,15 @@ static void udpos(rtk_t *rtk, double tt)
     for (i=0;i<3;i++) {
         F[i+(i+6)*nx]=SQR(tt)/2.0;
     }
+    // rtk->x 赋值参数阵 x[]、rtk->P 赋值方差阵 P[]
     for (i=0;i<nx;i++) {
         x[i]=rtk->x[ix[i]];
         for (j=0;j<nx;j++) {
             P[i+j*nx]=rtk->P[ix[i]+ix[j]*rtk->nx];
         }
     }
+
+    // 用状态转移矩阵对参数和协方差郑进行卡尔曼滤波时间更新
     /* x=F*x, P=F*P*F+Q */
     matmul("NN",nx,1,nx,1.0,F,x,0.0,xp);
     matmul("NN",nx,nx,nx,1.0,F,P,0.0,FP);
@@ -508,6 +542,7 @@ static void udpos(rtk_t *rtk, double tt)
             rtk->P[ix[i]+ix[j]*rtk->nx]=P[i+j*nx];
         }
     }
+    // 给加速度加过程噪声，先存到 Q，再赋值给 rtk->P
     /* process noise added to only acceleration */
     Q[0]=Q[4]=SQR(rtk->opt.prn[3])*fabs(tt);
     Q[8]=SQR(rtk->opt.prn[4])*fabs(tt);
@@ -518,6 +553,8 @@ static void udpos(rtk_t *rtk, double tt)
     }
     free(ix); free(F); free(P); free(FP); free(x); free(xp);
 }
+
+// 电离层参数时间更新
 /* temporal update of ionospheric parameters ---------------------------------*/
 static void udion(rtk_t *rtk, double tt, double bl, const int *sat, int ns)
 {
@@ -526,18 +563,21 @@ static void udion(rtk_t *rtk, double tt, double bl, const int *sat, int ns)
     
     trace(3,"udion   : tt=%.3f bl=%.0f ns=%d\n",tt,bl,ns);
     
+    // 遍历每颗卫星，如果两个频率，载波中断计数都大于 GAP_RESION(120)，电离层参数设为 0
     for (i=1;i<=MAXSAT;i++) {
         j=II(i,&rtk->opt);
         if (rtk->x[j]!=0.0&&
             rtk->ssat[i-1].outc[0]>GAP_RESION&&rtk->ssat[i-1].outc[1]>GAP_RESION)
             rtk->x[j]=0.0;
     }
+    // 遍历共视卫星
     for (i=0;i<ns;i++) {
         j=II(sat[i],&rtk->opt);
-        
+        // 如果电离层状态量为 0，状态设为 1E-6，协方差设为 SQR(rtk->opt.std[1]*bl/1E4)，bl为基线长度
         if (rtk->x[j]==0.0) {
             initx(rtk,1E-6,SQR(rtk->opt.std[1]*bl/1E4),j);
         }
+        // 电离层状态量不为 0，加过程噪声 SQR(rtk->opt.prn[1]*bl/1E4*fact)*fabs(tt)
         else {
             /* elevation dependent factor of process noise */
             el=rtk->ssat[sat[i]-1].azel[1];
@@ -546,6 +586,8 @@ static void udion(rtk_t *rtk, double tt, double bl, const int *sat, int ns)
         }
     }
 }
+
+// 对流层参数时间更新
 /* temporal update of tropospheric parameters --------------------------------*/
 static void udtrop(rtk_t *rtk, double tt, double bl)
 {
@@ -553,19 +595,23 @@ static void udtrop(rtk_t *rtk, double tt, double bl)
     
     trace(3,"udtrop  : tt=%.3f\n",tt);
     
+    // 处理基站、移动站对流层延迟
     for (i=0;i<2;i++) {
         j=IT(i,&rtk->opt);
         
+        // 如果对流层状态量为 0，用 INIT_ZWD、SQR(rtk->opt.std[2])初始化天顶方向对流层延迟
         if (rtk->x[j]==0.0) {
             initx(rtk,INIT_ZWD,SQR(rtk->opt.std[2]),j); /* initial zwd */
             
+            // TROPOPT_ESTG 模式，用 1E-6、VAR_GRA 初始化东向、北向的对流层梯度系数
             if (rtk->opt.tropopt>=TROPOPT_ESTG) {
                 for (k=0;k<2;k++) initx(rtk,1E-6,VAR_GRA,++j);
             }
         }
+        // 对流层状态量不为 0，增加过程噪声 SQR(rtk->opt.prn[2])*fabs(tt)
         else {
             rtk->P[j+j*rtk->nx]+=SQR(rtk->opt.prn[2])*fabs(tt);
-            
+            // TROPOPT_ESTG 模式，给东向、北向的对流层梯度系数加过程噪声`SQR(rtk->opt.prn[2]*0.3)*fabs(tt)`
             if (rtk->opt.tropopt>=TROPOPT_ESTG) {
                 for (k=0;k<2;k++) {
                     rtk->P[++j*(1+rtk->nx)]+=SQR(rtk->opt.prn[2]*0.3)*fabs(tt);
@@ -581,9 +627,11 @@ static void udrcvbias(rtk_t *rtk, double tt)
     
     trace(3,"udrcvbias: tt=%.3f\n",tt);
     
+    // 遍历 GLONASS 的频率
     for (i=0;i<NFREQGLO;i++) {
         j=IL(i,&rtk->opt);
         
+        // 如果接收机硬件偏移参数为 0，用 1E-6、VAR_HWBIAS 初始化
         if (rtk->x[j]==0.0) {
             initx(rtk,1E-6,VAR_HWBIAS,j);
         }
@@ -592,10 +640,12 @@ static void udrcvbias(rtk_t *rtk, double tt)
             initx(rtk,rtk->xa[j],rtk->Pa[j+j*rtk->na],j);
         }
         else {
-            rtk->P[j+j*rtk->nx]+=SQR(PRN_HWBIAS)*fabs(tt);
+            rtk->P[j+j*rtk->nx]+=SQR(PRN_HWBIAS)*fabs(tt);  // 加过程噪声
         }
     }
 }
+
+// 根据 LLI 周跳检测
 /* detect cycle slip by LLI --------------------------------------------------*/
 static void detslp_ll(rtk_t *rtk, const obsd_t *obs, int i, int rcv)
 {
@@ -604,8 +654,9 @@ static void detslp_ll(rtk_t *rtk, const obsd_t *obs, int i, int rcv)
     
     trace(3,"detslp_ll: i=%d rcv=%d\n",i,rcv);
     
+    // nf 是频点个数(1:L1,2:L1+L2,3:L1+L2+L5)
     for (f=0;f<rtk->opt.nf;f++) {
-        
+        // bit0 为 1，表明当前历元可能发生了周跳
         if (obs[i].L[f]==0.0||
             fabs(timediff(obs[i].time,rtk->ssat[sat-1].pt[rcv-1][f]))<DTTOL) {
             continue;
@@ -623,12 +674,17 @@ static void detslp_ll(rtk_t *rtk, const obsd_t *obs, int i, int rcv)
             slip=obs[i].LLI[f];
         }
         else { /* backward */
+            // 前一历元 bit0 位为1，表明前一历元发生可能发生了周跳
             if (LLI&1) {
                 errmsg(rtk,"slip detected backward (sat=%2d rcv=%d F=%d LLI=%x)\n",
                        sat,rcv,f+1,LLI);
             }
             slip=LLI;
         }
+
+        // (LLI&2)&&!(obs[i].LLI[f]&2)：前一历元 bit1 位为 1 并且当前历元 bit1 位不为 1
+        // (!(LLI&2)&&(obs[i].LLI[f]&2)：前一历元 bit1 位为 0 且当前历元 bit1 位为 1
+        // 即前后历元的 bit1 位不相同，表明可能发生了半周跳。
         /* detect slip by parity unknown flag transition in LLI */
         if (((LLI&2)&&!(obs[i].LLI[f]&2))||(!(LLI&2)&&(obs[i].LLI[f]&2))) {
             errmsg(rtk,"slip detected half-cyc (sat=%2d rcv=%d F=%d LLI=%x->%x)\n",
@@ -644,6 +700,8 @@ static void detslp_ll(rtk_t *rtk, const obsd_t *obs, int i, int rcv)
         rtk->ssat[sat-1].half[f]=(obs[i].LLI[f]&2)?0:1;
     }
 }
+
+// 利用几何无关组合进行周跳检测
 /* detect cycle slip by geometry free phase jump -----------------------------*/
 static void detslp_gf(rtk_t *rtk, const obsd_t *obs, int i, int j,
                       const nav_t *nav)
@@ -700,7 +758,18 @@ static void detslp_dop(rtk_t *rtk, const obsd_t *obs, int i, int rcv,
     }
 #endif
 }
-/* temporal update of phase biases -------------------------------------------*/
+
+// 更新载波相位偏移状态（单差整周模糊度）值到 rtk->x 以及更新其误差协方差到 rtk->P
+/* temporal update of phase biases -------------------------------------------
+ * args:rtk_t    *rtk      IO  rtk控制结构体
+ *      double   tt        I   本次更新与上次更新的时间差
+ *      obsd_t   *obs      I   观测数据
+ *      int      sat       I   接收机和基站共同观测的卫星号列表
+ *      int      *iu       I   接收机和基站共同观测的卫星在接收机观测值中的index值列表
+ *      int      *ir       I   接收机和基站共同观测的卫星在基站观测值中的index值列表
+ *      int      ns        I   接收机和基站共同观测的卫星个数
+ *      nav_t    *nav      I   导航数据
+ ------------------------------------------------------------------------------*/
 static void udbias(rtk_t *rtk, double tt, const obsd_t *obs, const int *sat,
                    const int *iu, const int *ir, int ns, const nav_t *nav)
 {
@@ -709,16 +778,20 @@ static void udbias(rtk_t *rtk, double tt, const obsd_t *obs, const int *sat,
     
     trace(3,"udbias  : tt=%.3f ns=%d\n",tt,ns);
     
+    // 首先是对所有共视星进行周跳检测
+    // 遍历每一颗卫星
     for (i=0;i<ns;i++) {
-        
+        // 调用 detslp_ll() 根据 LLI 检查接收机和基站观测数据是否有周跳
         /* detect cycle slip by LLI */
         for (k=0;k<rtk->opt.nf;k++) rtk->ssat[sat[i]-1].slip[k]&=0xFC;
         detslp_ll(rtk,obs,iu[i],1);
         detslp_ll(rtk,obs,ir[i],2);
         
+        // 调用 detslp_gf() 利用几何无关组合进行周跳检测
         /* detect cycle slip by geometry-free phase jump */
         detslp_gf(rtk,obs,iu[i],ir[i],nav);
         
+        // 调用 detslp_dop() 利用多普勒进行周跳检测（但该函数由于时间跳变的原因，暂未使用）
         /* detect cycle slip by doppler and phase difference */
         detslp_dop(rtk,obs,iu[i],1,nav);
         detslp_dop(rtk,obs,ir[i],2,nav);
@@ -729,7 +802,12 @@ static void udbias(rtk_t *rtk, double tt, const obsd_t *obs, const int *sat,
                 !((obs[iu[i]].LLI[k]&2)||(obs[ir[i]].LLI[k]&2));
         }
     }
+
+    // 遍历每一个频率
     for (k=0;k<nf;k++) {
+
+        // 若为 instantaneous 模式，或者卫星载波相位的中断次数rtk->ssat[i-1].outc
+        // 大于配置中所设置的最大次数rtk->opt.maxout，重置载波偏移值
         /* reset phase-bias if instantaneous AR or expire obs outage counter */
         for (i=1;i<=MAXSAT;i++) {
             
@@ -748,6 +826,8 @@ static void udbias(rtk_t *rtk, double tt, const obsd_t *obs, const int *sat,
                 rtk->ssat[i-1].lock[k]=-rtk->opt.minlock;
             }
         }
+        // 对共视星进行循环，对单差相位偏移状态量的协方差阵加入过程噪声 rtk->opt.prn[0]*rtk->opt.prn[0]*fabs(tt)
+        // 如果发现有周跳或者异常值，则单差相位偏移状态量重置为 0
         /* reset phase-bias if detecting cycle slip */
         for (i=0;i<ns;i++) {
             j=IB(sat[i],k,&rtk->opt);
@@ -760,17 +840,27 @@ static void udbias(rtk_t *rtk, double tt, const obsd_t *obs, const int *sat,
         }
         bias=zeros(ns,1);
         
-        /* estimate approximate phase-bias by phase - code */
+        /* estimate approximate phase-bias by phase - code 
+        对共视星进行循环，利用“单差伪距”和“单差载波相位”计算一个“单差相位偏移”估计值，
+        来对单差相位偏移状态量进行更新。由于如果忽略伪距误差，那么伪距减去载波相位，
+        则应该是载波相位（m）的相位偏移(m)，所以这里计算的是一个大致的相位偏移bias[i]。
+        如果配置为无电离层组合，计算则按照无电离层组合的方式来计算。
+        最后，仅计算所有有效星（单差相位偏移状态不为0）的offset = sum of (bias - phase-bias)。
+        其实就是计算每颗有效星bias[i]与单单差相位偏移状态量的偏差，然后把所有有效星的这个偏差值加起来，
+        之后会除以有效星的个数，最终就是求一个偏差平均值rtk->com_bias。
+        */
+       //对共视星进行循环
         for (i=j=0,offset=0.0;i<ns;i++) {
             
             if (rtk->opt.ionoopt!=IONOOPT_IFLC) {
-                cp=sdobs(obs,iu[i],ir[i],k); /* cycle */
-                pr=sdobs(obs,iu[i],ir[i],k+NFREQ);
-                freqi=sat2freq(sat[i],obs[iu[i]].code[k],nav);
+                cp=sdobs(obs,iu[i],ir[i],k); /* cycle */        // 载波相位单差观测值
+                pr=sdobs(obs,iu[i],ir[i],k+NFREQ);              // 伪距单差观测值
+                freqi=sat2freq(sat[i],obs[iu[i]].code[k],nav);  // 载波相位频率
                 if (cp==0.0||pr==0.0||freqi==0.0) continue;
                 
-                bias[i]=cp-pr*freqi/CLIGHT;
+                bias[i]=cp-pr*freqi/CLIGHT;     // 大致的相位偏移
             }
+            // 消电离层模式
             else {
                 cp1=sdobs(obs,iu[i],ir[i],0);
                 cp2=sdobs(obs,iu[i],ir[i],1);
@@ -784,8 +874,9 @@ static void udbias(rtk_t *rtk, double tt, const obsd_t *obs, const int *sat,
                 C2=-SQR(freq2)/(SQR(freq1)-SQR(freq2));
                 bias[i]=(C1*cp1*CLIGHT/freq1+C2*cp2*CLIGHT/freq2)-(C1*pr1+C2*pr2);
             }
+            // 与原来状态量中单差模糊度的偏差的总和
             if (rtk->x[IB(sat[i],k,&rtk->opt)]!=0.0) {
-                offset+=bias[i]-rtk->x[IB(sat[i],k,&rtk->opt)];
+                offset+=bias[i]-rtk->x[IB(sat[i],k,&rtk->opt)]; 
                 j++;
             }
         }
@@ -795,6 +886,7 @@ static void udbias(rtk_t *rtk, double tt, const obsd_t *obs, const int *sat,
                 if (rtk->x[IB(i,k,&rtk->opt)]!=0.0) rtk->x[IB(i,k,&rtk->opt)]+=offset/j;
             }
         }
+        // 利用求得的 bias[i] 来对没有进行初始化的卫星，进行单差相位偏移状态量的初始化
         /* set initial states of phase-bias */
         for (i=0;i<ns;i++) {
             if (bias[i]==0.0||rtk->x[IB(sat[i],k,&rtk->opt)]!=0.0) continue;
@@ -803,7 +895,19 @@ static void udbias(rtk_t *rtk, double tt, const obsd_t *obs, const int *sat,
         free(bias);
     }
 }
-/* temporal update of states --------------------------------------------------*/
+
+// 这个函数主要是对各状态参数进行预测，更新状态值 rtk->x 及其误差协方差 rtk->P
+// 状态参数可能包括坐标、速度、加速度、电离层延迟、对流层天顶湿延迟、模糊度参数、GLONASS卫星的接收机硬件延迟，
+// 分别对应udpos函数、udion函数、udtrop函数、udbias函数、udrcvbias函数。
+/* temporal update of states --------------------------------------------------
+ * args:rtk_t    *rtk      IO  rtk控制结构体
+ *      obsd_t   *obs      I   观测数据
+ *      int      sat       I   接收机和基站共同观测的卫星号列表
+ *      int      *iu       I   接收机和基站共同观测的卫星在接收机观测值中的index值列表
+ *      int      *ir       I   接收机和基站共同观测的卫星在基站观测值中的index值列表
+ *      int      ns        I   接收机和基站共同观测的卫星个数
+ *      nav_t    *nav      I   导航数据
+ -----------------------------------------------------------------------------*/
 static void udstate(rtk_t *rtk, const obsd_t *obs, const int *sat,
                     const int *iu, const int *ir, int ns, const nav_t *nav)
 {
@@ -811,28 +915,46 @@ static void udstate(rtk_t *rtk, const obsd_t *obs, const int *sat,
     
     trace(3,"udstate : ns=%d\n",ns);
     
+    // 调用 udpos() 根据不同模式更新rtk中的位置、速度、加速度值和协方差
     /* temporal update of position/velocity/acceleration */
     udpos(rtk,tt);
     
+    // 电离层模式>=IONOOPT_EST，调用 udion 更新状态 rtk->x 中的电离层参数（MAXSAT个）及其协方差
     /* temporal update of ionospheric parameters */
     if (rtk->opt.ionoopt>=IONOOPT_EST) {
         bl=baseline(rtk->x,rtk->rb,dr);
         udion(rtk,tt,bl,sat,ns);
     }
+
+    // 若对流层模式>=TROPOPT_EST，调用 udtrop 更新状态 rtk->x 中的对流层参数（2或6个）及其协方差
     /* temporal update of tropospheric parameters */
     if (rtk->opt.tropopt>=TROPOPT_EST) {
-        udtrop(rtk,tt,bl);
+        udtrop(rtk,tt,bl);      // 对流层这里也需要用到上面电离层处理时的基线长度 bl
     }
+    // 若为 GLONASS AR 模式，调用 udrcvbias() 更新接收机硬件偏移
     /* temporal update of eceiver h/w bias */
     if (rtk->opt.glomodear==2&&(rtk->opt.navsys&SYS_GLO)) {
         udrcvbias(rtk,tt);
     }
+    // 若模式>PMODE_DGPS，调用 udbias() 更新载波相位偏移状态值以及其误差协方差
     /* temporal update of phase-bias */
     if (rtk->opt.mode>PMODE_DGPS) {
         udbias(rtk,tt,obs,sat,iu,ir,ns,nav);
     }
 }
-/* UD (undifferenced) phase/code residual for satellite ----------------------*/
+
+//计算接收机或基站对某一颗卫星的非差残差（Zero-Difference Residuals）。y = 观测值 - r - dant
+/* UD (undifferenced) phase/code residual for satellite ----------------------
+ * args:int      base      I   0表示接收机，1表示基站
+ *      double   r         I   经过钟差和对流层校正后的几何距离
+ *      obsd_t   *obs      I   OBS观测数据
+ *      nav_t    *nav      I   NAV导航数据
+ *      double   *azel     I   方位角和俯仰角 (rad)
+ *      double   *dant     I   接收机天线校正值
+ *      prcopt_t *opt      I   处理过程选项
+ *      double   *y        O   非差残差
+ *      double *freq
+ -----------------------------------------------------------------------------*/
 static void zdres_sat(int base, double r, const obsd_t *obs, const nav_t *nav,
                       const double *azel, const double *dant,
                       const prcopt_t *opt, double *y, double *freq)
@@ -840,41 +962,67 @@ static void zdres_sat(int base, double r, const obsd_t *obs, const nav_t *nav,
     double freq1,freq2,C1,C2,dant_if;
     int i,nf=NF(opt);
     
+    // 电离层校正模式为 IONOOPT_IFLC 的情况
     if (opt->ionoopt==IONOOPT_IFLC) { /* iono-free linear combination */
+        // 获取观测值 obs->code[0]、obs->code[1] 的频率 freq1、freq2
         freq1=sat2freq(obs->sat,obs->code[0],nav);
         freq2=sat2freq(obs->sat,obs->code[1],nav);
         if (freq1==0.0||freq2==0.0) return;
         
+        // 调用 testsnr() 检测信噪比
         if (testsnr(base,0,azel[1],obs->SNR[0]*SNR_UNIT,&opt->snrmask)||
             testsnr(base,1,azel[1],obs->SNR[1]*SNR_UNIT,&opt->snrmask)) return;
         
+        // 计算消电离层组合系数c1、c2    (E.5.23)
         C1= SQR(freq1)/(SQR(freq1)-SQR(freq2));
         C2=-SQR(freq2)/(SQR(freq1)-SQR(freq2));
+
+        // 计算天线校正值 dant_if
         dant_if=C1*dant[0]+C2*dant[1];
         
-        if (obs->L[0]!=0.0&&obs->L[1]!=0.0) {
+        // 计算残差
+        if (obs->L[0]!=0.0&&obs->L[1]!=0.0) {   // 载波相位残差  (E.5.22) 
             y[0]=C1*obs->L[0]*CLIGHT/freq1+C2*obs->L[1]*CLIGHT/freq2-r-dant_if;
         }
-        if (obs->P[0]!=0.0&&obs->P[1]!=0.0) {
+        if (obs->P[0]!=0.0&&obs->P[1]!=0.0) {   // 伪距残差  (E.5.21) 
             y[1]=C1*obs->P[0]+C2*obs->P[1]-r-dant_if;
         }
         freq[0]=1.0;
     }
+    // 电离层校正模式不为 IONOOPT_IFLC 的情况
     else {
         for (i=0;i<nf;i++) {
-            if ((freq[i]=sat2freq(obs->sat,obs->code[i],nav))==0.0) continue;
-            
-            /* check SNR mask */
+            if ((freq[i]=sat2freq(obs->sat,obs->code[i],nav))==0.0) continue;            
+            /* check SNR mask */    // 检测信噪比
             if (testsnr(base,i,azel[1],obs->SNR[i]*SNR_UNIT,&opt->snrmask)) {
                 continue;
             }
-            /* residuals = observable - pseudorange */
+            /* residuals = observable - pseudorange */      // 计算残差
             if (obs->L[i]!=0.0) y[i   ]=obs->L[i]*CLIGHT/freq[i]-r-dant[i];
             if (obs->P[i]!=0.0) y[i+nf]=obs->P[i]               -r-dant[i];
         }
     }
 }
-/* UD (undifferenced) phase/code residuals -----------------------------------*/
+
+// 这个函数主要是计算流动站（base=0）和基准站（base=1）的非差残差，即没有差分的相位/码残差（Zero-Difference Residuals）
+// 即卫地距观测值（观测文件内的载波、伪距值）减去卫地距计算值
+/* UD (undifferenced) phase/code residuals -----------------------------------
+ * args:int      base      I   0表示接收机，1表示基站
+ *      obsd_t   *obs      I   OBS观测数据
+ *      int      n         I   OBS的数量
+ *      double   *rs       I   卫星位置和速度，长度为6*n，{x,y,z,vx,vy,vz}(ecef)(m,m/s)
+ *      double   *dts      I   卫星钟差，长度为2*n， {bias,drift} (s|s/s)
+ *      int      *svh      I   卫星健康标志 (-1:correction not available)
+ *      nav_t    *nav      I   NAV导航数据
+ *      double   *rr       I   接收机/基站的位置和速度，长度为6*n，{x,y,z,vx,vy,vz}(ecef)(m,m/s)
+ *      prcopt_t *opt      I   处理过程选项
+ *      int      index     I   0表示接收机，1表示基站，与参数 base 重复了
+ *      double   *y        O   相位/码残差
+ *      double   *e        O   观测矢量 (ecef)
+ *      double   *azel     O   方位角和俯仰角 (rad)
+ *      double   *freq     O   载波频率
+ * return : (1:ok,0:error)
+ -----------------------------------------------------------------------------*/
 static int zdres(int base, const obsd_t *obs, int n, const double *rs,
                  const double *dts, const double *var, const int *svh,
                  const nav_t *nav, const double *rr, const prcopt_t *opt,
@@ -887,11 +1035,14 @@ static int zdres(int base, const obsd_t *obs, int n, const double *rs,
     trace(3,"zdres   : n=%d\n",n);
     
     for (i=0;i<n*nf*2;i++) y[i]=0.0;
-    
+
+    // 若没有接收机位置，return 0
     if (norm(rr,3)<=0.0) return 0; /* no receiver position */
+
+    // 接收机位置传给 rr_
+    for (i=0;i<3;i++) rr_[i]=rr[i];  
     
-    for (i=0;i<3;i++) rr_[i]=rr[i];
-    
+    // 若需要地球潮校正，调用 tidedisp() 对 rr_ 进行校正，地球潮包含固体潮、极潮和海潮负荷
     /* earth tide correction */
     if (opt->tidecorr) {
         tidedisp(gpst2utc(obs[0].time),rr_,opt->tidecorr,&nav->erp,
@@ -900,25 +1051,36 @@ static int zdres(int base, const obsd_t *obs, int n, const double *rs,
     }
     ecef2pos(rr_,pos);
     
+    // 遍历观测量
     for (i=0;i<n;i++) {
+
+        // 根据卫星位置和接收机位置计算卫地距，并进行地球自转改正
         /* compute geometric-range and azimuth/elevation angle */
         if ((r=geodist(rs+i*6,rr_,e+i*3))<=0.0) continue;
         if (satazel(pos,e+i*3,azel+i*2)<opt->elmin) continue;
         
+        // 排除需要排除的卫星
         /* excluded satellite? */
         if (satexclude(obs[i].sat,var[i],svh[i],opt)) continue;
         
+        // 对卫地距进行卫星钟差距离改正r
         /* satellite clock-bias */
         r+=-CLIGHT*dts[i*2];
         
+        // 对卫地距进行对流层延迟改正。对流层延迟可分为大概 90% 的干延迟和 10% 的湿延迟，
+        // RTKLIB 内利用 Saastamoinen 模型只改正了对流层的干延迟，湿延迟通过随机游走估计的方式进行改正。
+        // 此处湿度传0，湿延迟计算出的结果就是 0
+        // 当然，建议对这一部分进行算法改进，利用 GPT2_w 等经验模型改正对流层的总延迟
         /* troposphere delay model (hydrostatic) */
         zhd=tropmodel(obs[0].time,pos,zazel,0.0);
         r+=tropmapf(obs[i].time,pos,azel+i*2,NULL)*zhd;
         
+        // 接收机天线相位中心改正，调用 antmodel() 计算校正值 dant（对每一个频率都有一个值）
         /* receiver antenna phase center correction */
         antmodel(opt->pcvr+index,opt->antdel[index],azel+i*2,opt->posopt[1],
                  dant);
         
+        // 观测值减经过上述各项改正后的计算值，得到最终的非差残差 v。此处涉及到无电离层组合观测值的求解。
         /* UD phase/code residual for satellite */
         zdres_sat(base,r,obs+i,nav,azel+i*2,dant,opt,y+i*nf*2,freq+i*nf);
     }
@@ -951,6 +1113,7 @@ static void ddcov(const int *nb, int n, const double *Ri, const double *Rj,
     for (i=0;i<nv*nv;i++) R[i]=0.0;
     for (b=0;b<n;k+=nb[b++]) {
         
+        // i==j时为Ri[k+i]+Rj[k+i]，i!=j时为Ri[k+i]
         for (i=0;i<nb[b];i++) for (j=0;j<nb[b];j++) {
             R[k+i+(k+j)*nv]=Ri[k+i]+(i==j?Rj[k+i]:0.0);
         }
@@ -1007,8 +1170,9 @@ static double prectrop(gtime_t time, const double *pos, int r,
     double m_w=0.0,cotz,grad_n,grad_e;
     int i=IT(r,opt);
     
+    // 调用 tropmapf() 计算干湿延迟投影系数
     /* wet mapping function */
-    tropmapf(time,pos,azel,&m_w);
+    tropmapf(time,pos,azel,&m_w);   
     
     if (opt->tropopt>=TROPOPT_ESTG&&azel[1]>0.0) {
         
@@ -1038,7 +1202,27 @@ static int test_sys(int sys, int m)
     }
     return 0;
 }
-/* DD (double-differenced) phase/code residuals ------------------------------*/
+
+// 计算观测方程系数矩阵 H、双差残差矩阵 v、双差观测值协方差矩阵 R
+/* DD (double-differenced) phase/code residuals ------------------------------
+ * args:rtk_t    *rtk      IO  rtk控制结构体
+ *      nav_t    *nav      I   导航数据
+ *      double   dt        I   接收机和基站的时间差
+ *      double   *x        IO  状态变量
+ *      double   *P        IO  状态变量的误差协方差阵
+ *      int      sat       I   接收机和基站共同观测的卫星号列表
+ *      double   *y        IO  相位/码残差
+ *      double   *e        IO  观测矢量 (ecef)
+ *      double   *azel     O   方位角和俯仰角 (rad)
+ *      int      *iu       I   接收机和基站共同观测的卫星在接收机观测值中的index值列表
+ *      int      *ir       I   接收机和基站共同观测的卫星在基站观测值中的index值列表
+ *      int      ns        I   接收机和基站共同观测的卫星个数
+ *      double   *v        O   实际观测量与预测观测量的残差
+ *      double   *H        O   观测矩阵
+ *      double   *R        O   测量误差的协方差
+ *      int      *vflg     O   数据有效标志
+ * return : (>0:ok,0:error)
+ ------------------------------------------------------------------------------*/
 static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
                  const double *P, const int *sat, double *y, double *e,
                  double *azel, double *freq, const int *iu, const int *ir,
@@ -1051,29 +1235,39 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
     
     trace(3,"ddres   : dt=%.1f nx=%d ns=%d\n",dt,rtk->nx,ns);
     
-    bl=baseline(x,rtk->rb,dr);
-    ecef2pos(x,posu); ecef2pos(rtk->rb,posr);
+    bl=baseline(x,rtk->rb,dr);                  // 计算基线长度 bl，基线向量 dr
+    ecef2pos(x,posu); ecef2pos(rtk->rb,posr);   // 基准站、流动站 XYZ-LLH
     
     Ri=mat(ns*nf*2+2,1); Rj=mat(ns*nf*2+2,1); im=mat(ns,1);
     tropu=mat(ns,1); tropr=mat(ns,1); dtdxu=mat(ns,3); dtdxr=mat(ns,3);
     
+    // 所有伪距残差、载波相位残差重置为 0
     for (i=0;i<MAXSAT;i++) for (j=0;j<NFREQ;j++) {
-        rtk->ssat[i].resp[j]=rtk->ssat[i].resc[j]=0.0;
+        rtk->ssat[i].resp[j]=rtk->ssat[i].resc[j]=0.0;  
     }
     /* compute factors of ionospheric and tropospheric delay */
     for (i=0;i<ns;i++) {
+        // 若电离层模式 >=IONOOPT_EST，调用 ionmapf() 计算电离层延迟因子
+        // 基准站、流动站，im[i]取基准站、流动站的平均
         if (opt->ionoopt>=IONOOPT_EST) {
             im[i]=(ionmapf(posu,azel+iu[i]*2)+ionmapf(posr,azel+ir[i]*2))/2.0;
         }
+        // 若对流层模式 >=TROPOPT_EST，调用 prectrop() 计算对流层延迟因子
+        // 流动站tropu[i]、基准站tropr[i]
         if (opt->tropopt>=TROPOPT_EST) {
             tropu[i]=prectrop(rtk->sol.time,posu,0,azel+iu[i]*2,opt,x,dtdxu+i*3);
             tropr[i]=prectrop(rtk->sol.time,posr,1,azel+ir[i]*2,opt,x,dtdxr+i*3);
         }
     }
+
+    // 遍历不同系统
     for (m=0;m<6;m++) /* m=0:GPS/SBS,1:GLO,2:GAL,3:BDS,4:QZS,5:IRN */
     
+    // 遍历每一个频率，计算双差残差
+    // 若为 PMODE_DGPS 伪距双差，需要限制遍历范围
+    // 载波相位在 0-nf，伪距在 nf-2nf 为，因此伪距差分定位从 nf 开始
     for (f=opt->mode>PMODE_DGPS?0:nf;f<nf*2;f++) {
-        
+        // 寻找仰角最高的卫星作为参考卫星
         /* search reference satellite with highest elevation */
         for (i=-1,j=0;j<ns;j++) {
             sysi=rtk->ssat[sat[j]-1].sys;
@@ -1081,8 +1275,9 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
             if (!validobs(iu[j],ir[j],f,nf,y)) continue;
             if (i<0||azel[1+iu[j]*2]>=azel[1+iu[i]*2]) i=j;
         }
-        if (i<0) continue;
+        if (i<0) continue;  // 选取失败则 continue
         
+        // 遍历所有卫星，计算双差
         /* make DD (double difference) */
         for (j=0;j<ns;j++) {
             if (i==j) continue;
@@ -1093,30 +1288,40 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
             if (!test_sys(sysj,m)) continue;
             if (!validobs(iu[j],ir[j],f,nf,y)) continue;
             
+            // 用传入的非差相位/码残差 y 计算双差残差 v，并计算对应的 H
             if (H) {
+                // 将 H+nv*rtk->nx 的地址赋给 H，此时更改 Hi 中的值即更改 H 矩阵中的值
                 Hi=H+nv*rtk->nx;
                 for (k=0;k<rtk->nx;k++) Hi[k]=0.0;
             }
+
+            //双差残差计算：【参考星(移动站) - 参考星(基准站)】- 【非参考星(移动站) - 非参考星(基准站)】
             /* DD residual */
             v[nv]=(y[f+iu[i]*nf*2]-y[f+ir[i]*nf*2])-
                   (y[f+iu[j]*nf*2]-y[f+ir[j]*nf*2]);
             
+            // 移动站位置偏导：移动站非参考星视线向量 - 移动站参考星视线向量
             /* partial derivatives by rover position */
             if (H) {
                 for (k=0;k<3;k++) {
-                    Hi[k]=-e[k+iu[i]*3]+e[k+iu[j]*3];
+                    Hi[k]=-e[k+iu[i]*3]+e[k+iu[j]*3];   // 每一行前 3 列为观测向量差
                 }
             }
+
+            // 若要估计电离层参数，模式 IONOOPT_EST，用电离层延迟因子修正 v 和 H
+            // 注意伪距和载波相位的电离层延迟大小相同，但是符号相反
             /* DD ionospheric delay term */
             if (opt->ionoopt==IONOOPT_EST) {
-                didxi=(f<nf?-1.0:1.0)*im[i]*SQR(FREQ1/freqi);
-                didxj=(f<nf?-1.0:1.0)*im[j]*SQR(FREQ1/freqj);
+                didxi=(f<nf?-1.0:1.0)*im[i]*SQR(FREQ1/freqi);   // 载波相位为负
+                didxj=(f<nf?-1.0:1.0)*im[j]*SQR(FREQ1/freqj);   // 伪距为正
                 v[nv]-=didxi*x[II(sat[i],opt)]-didxj*x[II(sat[j],opt)];
                 if (H) {
                     Hi[II(sat[i],opt)]= didxi;
                     Hi[II(sat[j],opt)]=-didxj;
                 }
             }
+
+            // 若要估计对流层参数，模式 TROPOPT_EST，用对流层延迟因子修正 v 和 H
             /* DD tropospheric delay term */
             if (opt->tropopt==TROPOPT_EST||opt->tropopt==TROPOPT_ESTG) {
                 v[nv]-=(tropu[i]-tropu[j])-(tropr[i]-tropr[j]);
@@ -1126,6 +1331,10 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
                     Hi[IT(1,opt)+k]=-(dtdxr[k+i*3]-dtdxr[k+j*3]);
                 }
             }
+
+            // 用相位偏移修正 v 和 H
+            // 如果不是无电离层组合，从载波相位双差残差中扣除双差模糊度部分（即phase-bias），
+            // 并对 H 矩阵中和模糊度相关的部分进行赋值
             /* DD phase-bias term */
             if (f<nf) {
                 if (opt->ionoopt!=IONOOPT_IFLC) {
@@ -1144,9 +1353,11 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
                     }
                 }
             }
+            // 将双差载波，伪距残差，输出到相应的结构体中
             if (f<nf) rtk->ssat[sat[j]-1].resc[f   ]=v[nv];
             else      rtk->ssat[sat[j]-1].resp[f-nf]=v[nv];
             
+            // 根据选项 maxinno 的值检测是否要排除此观测数据
             /* test innovation */
             if (opt->maxinno>0.0&&fabs(v[nv])>opt->maxinno) {
                 if (f<nf) {
@@ -1157,10 +1368,13 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
                        sat[i],sat[j],f<nf?"L":"P",f%nf+1,v[nv]);
                 continue;
             }
+
+            // 计算单差的测量误差协方差 Ri、i 为参考星，j 为非参考星
             /* SD (single-differenced) measurement error variances */
             Ri[nv]=varerr(sat[i],sysi,azel[1+iu[i]*2],bl,dt,f,opt);
             Rj[nv]=varerr(sat[j],sysj,azel[1+iu[j]*2],bl,dt,f,opt);
             
+            // 设置数据有效标志，首先是载波，然后是伪距；根据 f<nf 判断
             /* set valid data flags */
             if (opt->mode>PMODE_DGPS) {
                 if (f<nf) rtk->ssat[sat[i]-1].vsat[f]=rtk->ssat[sat[j]-1].vsat[f]=1;
@@ -1178,6 +1392,7 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
     }
     /* end of system loop */
     
+    // 如果是动基线的模式，增加基线长度约束
     /* baseline length constraint for moving baseline */
     if (opt->mode==PMODE_MOVEB&&constbl(rtk,x,P,v,H,Ri,Rj,nv)) {
         vflg[nv++]=3<<4;
@@ -1185,6 +1400,7 @@ static int ddres(rtk_t *rtk, const nav_t *nav, double dt, const double *x,
     }
     if (H) {trace(5,"H=\n"); tracemat(5,H,rtk->nx,nv,7,4);}
     
+    // 调用 ddcov()，计算载波相位/伪距双差量测噪声协方差阵 R
     /* DD measurement error covariance */
     ddcov(nb,b,Ri,Rj,nv,R);
     
@@ -1302,6 +1518,8 @@ static void restamb(rtk_t *rtk, const double *bias, int nb, double *xa)
         }
     }
 }
+
+// 
 /* hold integer ambiguity ----------------------------------------------------*/
 static void holdamb(rtk_t *rtk, const double *xa)
 {
@@ -1312,6 +1530,7 @@ static void holdamb(rtk_t *rtk, const double *xa)
     
     v=mat(nb,1); H=zeros(nb,rtk->nx);
     
+    // 循环遍历各个卫星，查找满足条件的卫星，并设置相应标志位 rtk->ssat[i].fix=3
     for (m=0;m<5;m++) for (f=0;f<nf;f++) {
         
         for (n=i=0;i<MAXSAT;i++) {
@@ -1322,6 +1541,7 @@ static void holdamb(rtk_t *rtk, const double *xa)
             index[n++]=IB(i+1,f,&rtk->opt);
             rtk->ssat[i].fix[f]=3; /* hold */
         }
+        // 计算固定解双差和浮点解双差的差值，形成量测信息，并更新设计矩阵 H
         /* constraint to fixed ambiguity */
         for (i=1;i<n;i++) {
             v[nv]=(xa[index[0]]-xa[index[i]])-(rtk->x[index[0]]-rtk->x[index[i]]);
@@ -1331,6 +1551,7 @@ static void holdamb(rtk_t *rtk, const double *xa)
             nv++;
         }
     }
+    // 若观测量数量有效，设置 R 阵，并调用 filter() 量测更新
     if (nv>0) {
         R=zeros(nv,nv);
         for (i=0;i<nv;i++) R[i+i*nv]=VAR_HOLDAMB;
@@ -1343,6 +1564,11 @@ static void holdamb(rtk_t *rtk, const double *xa)
     }
     free(v); free(H);
 }
+
+// 根据 PRN 最小的卫星作为参考星，计算单差模糊度转双差模糊度的转换矩阵 D
+// 输入双差模糊度及协方差矩阵，利用 lambda 算法固定模糊度。
+// 根据矩阵反演公式，利用模糊度固定解调整其余状态参数浮点解，得到全部状态参数的固定解及协方差矩阵。
+// 重塑单差模糊度，便于固定解有效性验证
 /* resolve integer ambiguity by LAMBDA ---------------------------------------*/
 static int resamb_LAMBDA(rtk_t *rtk, double *bias, double *xa)
 {
@@ -1353,12 +1579,17 @@ static int resamb_LAMBDA(rtk_t *rtk, double *bias, double *xa)
 
     trace(3,"resamb_LAMBDA : nx=%d\n",nx);
     
+    // 整周模糊度 ratio 赋初值0.0
     rtk->sol.ratio=0.0;
     
+    // 检查配置中所设置的 ratio 值，如果该阈值小于1，则 return 0
     if (rtk->opt.mode<=PMODE_DGPS||rtk->opt.modear==ARMODE_OFF||
         rtk->opt.thresar[0]<1.0) {
         return 0;
     }
+
+    // 调用 ddidx() 函数，创建将卡尔曼状态量从单差转到双差的转换矩阵 D
+    // 主要是将单差相位偏移状态量转换为双差相位偏移
     /* index of SD to DD transformation matrix D */
     ix=imat(nx,2);
     if ((nb=ddidx(rtk,ix))<=0) {
@@ -1366,30 +1597,41 @@ static int resamb_LAMBDA(rtk_t *rtk, double *bias, double *xa)
         free(ix);
         return 0;
     }
+
+    // na 实际就是之前卡尔曼滤波中除了单差相位偏移之外的所有状态量个数（例如：位置+速度+加速度+电离层+对流层……）
+    // nb 则是双差相位偏移的个数（即需要解算的整周模糊度个数）
     y=mat(nb,1); DP=mat(nb,nx-na); b=mat(nb,2); db=mat(nb,1); Qb=mat(nb,nb);
     Qab=mat(na,nb); QQ=mat(na,nb);
     
+    // 根据转移矩阵，求解双差整周模糊度以及协方差阵
     /* y=D*xc, Qb=D*Qc*D', Qab=Qac*D' */
     for (i=0;i<nb;i++) {
         y[i]=rtk->x[ix[i*2]]-rtk->x[ix[i*2+1]];
     }
+    // 
     for (j=0;j<nx-na;j++) for (i=0;i<nb;i++) {
         DP[i+j*nb]=rtk->P[ix[i*2]+(na+j)*nx]-rtk->P[ix[i*2+1]+(na+j)*nx];
     }
+    // 整周模糊度的协方差阵
     for (j=0;j<nb;j++) for (i=0;i<nb;i++) {
         Qb[i+j*nb]=DP[i+(ix[j*2]-na)*nb]-DP[i+(ix[j*2+1]-na)*nb];
     }
+    // 整周和状态
     for (j=0;j<nb;j++) for (i=0;i<na;i++) {
         Qab[i+j*na]=rtk->P[i+ix[j*2]*nx]-rtk->P[i+ix[j*2+1]*nx];
     }
+
+    // 调用 lambda() 函数计算双差整周模糊度最优解以及残差。估计结果存在 b、s 中
     /* LAMBDA/MLAMBDA ILS (integer least-square) estimation */
     if (!(info=lambda(nb,2,y,Qb,b,s))) {
         trace(4,"N(1)="); tracemat(4,b   ,1,nb,10,3);
         trace(4,"N(2)="); tracemat(4,b+nb,1,nb,10,3);
         
+        // 计算 Ratio 值
         rtk->sol.ratio=s[0]>0?(float)(s[1]/s[0]):0.0f;
         if (rtk->sol.ratio>999.9) rtk->sol.ratio=999.9f;
-        
+
+        // 如果 Ratio 值大于阈值，模糊度固定成功，求解固定解 rtk->xa 以及固定解的协方差 rtk->Pa
         /* validation by popular ratio-test */
         if (s[0]<=0.0||s[1]/s[0]>=opt->thresar[0]) {
             
@@ -1413,6 +1655,7 @@ static int resamb_LAMBDA(rtk_t *rtk, double *bias, double *xa)
                 trace(3,"resamb : validation ok (nb=%d ratio=%.2f s=%.2f/%.2f)\n",
                       nb,s[0]==0.0?0.0:s[1]/s[0],s[0],s[1]);
                 
+                // 调用 restamb() 重新存储单差模糊度
                 /* restore SD ambiguity */
                 restamb(rtk,bias,nb,xa);
             }
@@ -1446,17 +1689,27 @@ static int valpos(rtk_t *rtk, const double *v, const double *R, const int *vflg,
     /* post-fit residual test */
     for (i=0;i<nv;i++) {
         if (v[i]*v[i]<=fact*R[i+i*nv]) continue;
-        sat1=(vflg[i]>>16)&0xFF;
-        sat2=(vflg[i]>> 8)&0xFF;
-        type=(vflg[i]>> 4)&0xF;
-        freq=vflg[i]&0xF;
+        sat1=(vflg[i]>>16)&0xFF;    // 参考卫星号
+        sat2=(vflg[i]>> 8)&0xFF;    // 非参考卫星号
+        type=(vflg[i]>> 4)&0xF;     // 种类：0载波 1伪距
+        freq=vflg[i]&0xF;           // 第几个频率
         stype=type==0?"L":(type==1?"L":"C");
         errmsg(rtk,"large residual (sat=%2d-%2d %s%d v=%6.3f sig=%.3f)\n",
               sat1,sat2,stype,freq+1,v[i],SQRT(R[i+i*nv]));
     }
     return stat;
 }
-/* relative positioning ------------------------------------------------------*/
+
+// 这个函数是 RTK 算法（实时动态相对定位）的核心函数
+// 调用的 selsat、udstate、zdres、ddres、filter、resamb_LAMBDA 等函数都很复杂
+/* relative positioning ------------------------------------------------------
+ * args:rtk_t    *rtk      IO  rtk控制结构体
+ *      obsd_t   *obs      I   观测数据
+ *      int      nu        I   接收机观测数据的数量
+ *      int      nr        I   基站观测数据的数量
+ *      nav_t    *nav      I   导航数据
+ * return : (1:ok,0:error)
+ ----------------------------------------------------------------------------*/
 static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
                   const nav_t *nav)
 {
@@ -1470,7 +1723,7 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
     
     trace(3,"relpos  : nx=%d nu=%d nr=%d\n",rtk->nx,nu,nr);
     
-    dt=timediff(time,obs[nu].time);
+    dt=timediff(time,obs[nu].time);     //计算流动站，参考站时间差
     
     rs=mat(6,n); dts=mat(2,n); var=mat(1,n); y=mat(nf*2,n); e=mat(3,n);
     azel=zeros(2,n); freq=zeros(nf,n);
@@ -1480,9 +1733,12 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
         for (j=0;j<NFREQ;j++) rtk->ssat[i].vsat[j]=0;
         for (j=1;j<NFREQ;j++) rtk->ssat[i].snr [j]=0;
     }
+
+    // 根据卫星星历计算当前历元下各卫星的位置、速度、钟差
     /* satellite positions/clocks */
     satposs(time,obs,n,nav,opt->sateph,rs,dts,var,svh);
     
+    // 计算基准站的各卫星观测值的非差残差（观测值-计算值）及卫星的高度角、方位角、卫星矢量等
     /* UD (undifferenced) residuals for base station */
     if (!zdres(1,obs+nu,nr,rs+nu*6,dts+nu*2,var+nu,svh+nu,nav,rtk->rb,opt,1,
                y+nu*nf*2,e+nu*3,azel+nu*2,freq+nu*nf)) {
@@ -1492,10 +1748,15 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
         free(freq);
         return 0;
     }
+
+    // 后处理中，需要时，调用 intpres() 进行插值
     /* time-interpolation of residuals (for post-processing) */
     if (opt->intpref) {
         dt=intpres(time,obs+nu,nr,nav,rtk,y+nu*nf*2);
     }
+
+    // 调用 selsat() 选择基准站和流动站之间的同步观测卫星，进行 RTK 算法时只需要基线间的同步观测卫星
+    // 返回共同观测的卫星个数，输出卫星号列表 sat、在接收机观测值中的 index 值列表 iu 和在基站观测值中的 index 值列表 ir
     /* select common satellites between rover and base-station */
     if ((ns=selsat(obs,azel,nu,nr,opt,sat,iu,ir))<=0) {
         errmsg(rtk,"no common satellite\n");
@@ -1504,9 +1765,12 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
         free(freq);
         return 0;
     }
+
+    // 调用 udstate 更新状态值 rtk->x 及其误差协方差 rtk->P
     /* temporal update of states */
     udstate(rtk,obs,sat,iu,ir,ns,nav);
     
+    // 初始化变量内存以及赋初值
     trace(4,"x(0)="); tracemat(4,rtk->x,1,NR(opt),13,4);
     
     xp=mat(rtk->nx,1); Pp=zeros(rtk->nx,rtk->nx); xa=mat(rtk->nx,1);
@@ -1515,16 +1779,23 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
     ny=ns*nf*2+2;
     v=mat(ny,1); H=zeros(rtk->nx,ny); R=mat(ny,ny); bias=mat(rtk->nx,1);
     
+    // 设置迭代次数 niter，动基线加 2 次
     /* add 2 iterations for baseline-constraint moving-base */
     niter=opt->niter+(opt->mode==PMODE_MOVEB&&opt->baseline[0]>0.0?2:0);
     
+    // 迭代量测更新 niter 次
     for (i=0;i<niter;i++) {
+        // 计算流动站的各位卫星观测值非差残差（观测值-计算值）及卫星的高度角、方位角、卫星矢量等
         /* UD (undifferenced) residuals for rover */
         if (!zdres(0,obs,nu,rs,dts,var,svh,nav,xp,opt,0,y,e,azel,freq)) {
             errmsg(rtk,"rover initial position error\n");
             stat=SOLQ_NONE;
             break;
         }
+
+        // 根据上述计算的基准站和流动站的各卫星观测值非差残差，计算双差残差矩阵 v
+        // 并且在这个函数内，根据流动站非差卫星矢量计算观测方程的双差系数矩阵 H、
+        // 根据非差观测值误差计算观测噪声的双差协方差矩阵 R
         /* DD (double-differenced) residuals and partial derivatives */
         if ((nv=ddres(rtk,nav,dt,xp,Pp,sat,y,e,azel,freq,iu,ir,ns,v,H,R,
                       vflg))<1) {
@@ -1532,6 +1803,11 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
             stat=SOLQ_NONE;
             break;
         }
+
+        // 进行卡尔曼滤波的第二步——计算增益矩阵并状态更新，利用卡尔曼滤波计算 RTK 浮点解
+        // 在进入 filter 函数之后需要对状态参数矩阵 x、状态噪声协方差矩阵 p
+        // 观测方程系数阵H进行矩阵缩小简化，去除未用到的卫星
+        // 这里 H 矩阵之所以使用转置的形式，是因为RTKLIB内存储矩阵的规则是按列存储的。
         /* Kalman filter measurement update */
         matcpy(Pp,rtk->P,rtk->nx,rtk->nx);
         if ((info=filter(xp,Pp,H,v,R,rtk->nx,nv))) {
@@ -1541,20 +1817,24 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
         }
         trace(4,"x(%d)=",i+1); tracemat(4,xp,1,NR(opt),13,4);
     }
+
+    // 量测更新完成，再次调用 zdres() 和 ddres() 计算双差相位/码残差，调用 valpos() 进行验证
+    // 若通过则更新 rtk->x 以及 rtk->P，并更新模糊度控制结构体
     if (stat!=SOLQ_NONE&&zdres(0,obs,nu,rs,dts,var,svh,nav,xp,opt,0,y,e,azel,
                                freq)) {
-        
+        // 利用浮点结果计算双差残差和量测噪声
         /* post-fit residuals for float solution */
         nv=ddres(rtk,nav,dt,xp,Pp,sat,y,e,azel,freq,iu,ir,ns,v,NULL,R,vflg);
         
+        // 计算流动站非差、双差残差，进行浮点解有效性验证
         /* validation of float solution */
         if (valpos(rtk,v,R,vflg,nv,4.0)) {
-            
-            /* update state and covariance matrix */
+
+            /* update state and covariance matrix */    // 存储浮点结果
             matcpy(rtk->x,xp,rtk->nx,1);
             matcpy(rtk->P,Pp,rtk->nx,rtk->nx);
-            
-            /* update ambiguity control struct */
+
+            /* update ambiguity control struct */       // 存模糊度相关信息，统计有效卫星数
             rtk->sol.ns=0;
             for (i=0;i<ns;i++) for (f=0;f<nf;f++) {
                 if (!rtk->ssat[sat[i]-1].vsat[f]) continue;
@@ -1562,23 +1842,26 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
                 rtk->ssat[sat[i]-1].outc[f]=0;
                 if (f==0) rtk->sol.ns++; /* valid satellite count by L1 */
             }
-            /* lack of valid satellites */
+
+            /* lack of valid satellites */      // 检验卫星数是否足够
             if (rtk->sol.ns<4) stat=SOLQ_NONE;
         }
         else stat=SOLQ_NONE;
     }
+
+    // 调用 resamb_LAMBDA() 利用 lambda 算法固定模糊度计算 RTK 固定解
     /* resolve integer ambiguity by LAMBDA */
     if (stat!=SOLQ_NONE&&resamb_LAMBDA(rtk,bias,xa)>1) {
-        
+        // 模糊度解算成功，根据固定结果计算残差和协方差，并进行校验
         if (zdres(0,obs,nu,rs,dts,var,svh,nav,xa,opt,0,y,e,azel,freq)) {
             
             /* post-fit reisiduals for fixed solution */
             nv=ddres(rtk,nav,dt,xa,NULL,sat,y,e,azel,freq,iu,ir,ns,v,NULL,R,
                      vflg);
-            
+            // 计算流动站非差、双差残差，进行固定解有效性验证
             /* validation of fixed solution */
             if (valpos(rtk,v,R,vflg,nv,4.0)) {
-                
+                // 固定解验证有效，若为 fix and hold 模式，需要存模糊度信息
                 /* hold integer ambiguity */
                 if (++rtk->nfix>=rtk->opt.minfix&&
                     rtk->opt.modear==ARMODE_FIXHOLD) {
@@ -1588,7 +1871,9 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
             }
         }
     }
+    // 保存结果状态，位置、速度、方差
     /* save solution status */
+    // 固定了存固定解，固定解在rtk->xa、rtk->Pa；否则存浮点解 rtk->x、rtk->P
     if (stat==SOLQ_FIX) {
         for (i=0;i<3;i++) {
             rtk->sol.rr[i]=rtk->xa[i];
@@ -1608,7 +1893,7 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
             rtk->sol.qv[5]=(float)rtk->Pa[5+3*rtk->na];
         }
     }
-    else {
+    else {  // 浮点解数据在 rtk->x、rtk->P
         for (i=0;i<3;i++) {
             rtk->sol.rr[i]=rtk->x[i];
             rtk->sol.qr[i]=(float)rtk->P[i+i*rtk->nx];
@@ -1628,16 +1913,22 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
         }
         rtk->nfix=0;
     }
+
+    // 存当前历元载波信息，供下次使用
     for (i=0;i<n;i++) for (j=0;j<nf;j++) {
         if (obs[i].L[j]==0.0) continue;
-        rtk->ssat[obs[i].sat-1].pt[obs[i].rcv-1][j]=obs[i].time;
-        rtk->ssat[obs[i].sat-1].ph[obs[i].rcv-1][j]=obs[i].L[j];
+        rtk->ssat[obs[i].sat-1].pt[obs[i].rcv-1][j]=obs[i].time;    // 先前历元载波相位时间
+        rtk->ssat[obs[i].sat-1].ph[obs[i].rcv-1][j]=obs[i].L[j];    // 先前历元载波相位观测值
     }
+
+    // 存 SNR 信噪比信息
     for (i=0;i<ns;i++) for (j=0;j<nf;j++) {
         
         /* output snr of rover receiver */
         rtk->ssat[sat[i]-1].snr[j]=obs[iu[i]].SNR[j];
     }
+
+    // 存卫星的模糊度固定及周跳信息
     for (i=0;i<MAXSAT;i++) for (j=0;j<nf;j++) {
         if (rtk->ssat[i].fix[j]==2&&stat!=SOLQ_FIX) rtk->ssat[i].fix[j]=1;
         if (rtk->ssat[i].slip[j]&1) rtk->ssat[i].slipc[j]++;
@@ -1649,6 +1940,8 @@ static int relpos(rtk_t *rtk, const obsd_t *obs, int nu, int nr,
     
     return stat!=SOLQ_NONE;
 }
+
+// 初始化 rtk_t 结构体
 /* initialize RTK control ------------------------------------------------------
 * initialize RTK control struct
 * args   : rtk_t    *rtk    IO  TKk control/result struct
@@ -1681,6 +1974,8 @@ extern void rtkinit(rtk_t *rtk, const prcopt_t *opt)
     for (i=0;i<MAXERRMSG;i++) rtk->errbuf[i]=0;
     rtk->opt=*opt;
 }
+
+// 释放 rtk_t 结构体，释放给矩阵开辟的空间
 /* free rtk control ------------------------------------------------------------
 * free memory for rtk control struct
 * args   : rtk_t    *rtk    IO  rtk control/result struct

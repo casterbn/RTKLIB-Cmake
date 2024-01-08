@@ -42,7 +42,7 @@ extern int dehanttideinel_(double *xsta, int *year, int *mon, int *day,
 static void tide_pl(const double *eu, const double *rp, double GMp,
                     const double *pos, double *dr)
 {
-    const double H3=0.292,L3=0.015;
+    const double H3=0.292,L3=0.015;         // 三阶 Love、Shida 数
     double r,ep[3],latp,lonp,p,K2,K3,a,H2,L2,dp,du,cosp,sinl,cosl;
     int i;
     
@@ -57,14 +57,16 @@ static void tide_pl(const double *eu, const double *rp, double GMp,
     latp=asin(ep[2]); lonp=atan2(ep[1],ep[0]);
     cosp=cos(latp); sinl=sin(pos[0]); cosl=cos(pos[0]);
     
+    // 二阶项
     /* step1 in phase (degree 2) */
     p=(3.0*sinl*sinl-1.0)/2.0;
-    H2=0.6078-0.0006*p;
-    L2=0.0847+0.0002*p;
+    H2=0.6078-0.0006*p;         // 二阶 Love 数
+    L2=0.0847+0.0002*p;         // 二阶 Shida 数
     a=dot(ep,eu,3);
     dp=K2*3.0*L2*a;
     du=K2*(H2*(1.5*a*a-0.5)-3.0*L2*a*a);
     
+    // 三阶项
     /* step1 in phase (degree 3) */
     dp+=K3*L3*(7.5*a*a-1.5);
     du+=K3*(H3*(2.5*a*a*a-1.5*a)-L3*(7.5*a*a-1.5)*a);
@@ -88,11 +90,13 @@ static void tide_solid(const double *rsun, const double *rmoon,
     
     trace(3,"tide_solid: pos=%.3f %.3f opt=%d\n",pos[0]*R2D,pos[1]*R2D,opt);
     
+    // 时域
     /* step1: time domain */
     eu[0]=E[2]; eu[1]=E[5]; eu[2]=E[8];
     tide_pl(eu,rsun, GMS,pos,dr1);
     tide_pl(eu,rmoon,GMM,pos,dr2);
     
+    // 频域，只有 K1 半径
     /* step2: frequency domain, only K1 radial */
     sin2l=sin(2.0*pos[0]);
     du=-0.012*sin2l*sin(gmst+pos[1]);
@@ -101,6 +105,7 @@ static void tide_solid(const double *rsun, const double *rmoon,
     dr[1]=dr1[1]+dr2[1]+du*E[5];
     dr[2]=dr1[2]+dr2[2]+du*E[8];
     
+    // 消除永久形变
     /* eliminate permanent deformation */
     if (opt&8) {
         sinl=sin(pos[0]); 
@@ -117,6 +122,7 @@ static void tide_solid(const double *rsun, const double *rmoon,
 /* displacement by ocean tide loading (ref [2] 7) ----------------------------*/
 static void tide_oload(gtime_t tut, const double *odisp, double *denu)
 {
+    // 11 个潮波定义
     const double args[][5]={
         {1.40519E-4, 2.0,-2.0, 0.0, 0.00},  /* M2 */
         {1.45444E-4, 0.0, 0.0, 0.0, 0.00},  /* S2 */
@@ -136,6 +142,7 @@ static void tide_oload(gtime_t tut, const double *odisp, double *denu)
     
     trace(3,"tide_oload:\n");
     
+    // 角度参数
     /* angular argument: see subroutine arg.f for reference [1] */
     time2epoch(tut,ep);
     fday=ep[3]*3600.0+ep[4]*60.0+ep[5];
@@ -150,6 +157,7 @@ static void tide_oload(gtime_t tut, const double *odisp, double *denu)
     a[3]=(334.329653+4069.0340329577*t-0.010325*t2-1.2E-5*t3)*D2R; /* P0 */
     a[4]=2.0*PI;
     
+    // 计算由 11 个潮波引起的位移
     /* displacements by 11 constituents */
     for (i=0;i<11;i++) {
         ang=0.0;
@@ -170,11 +178,13 @@ static void iers_mean_pole(gtime_t tut, double *xp_bar, double *yp_bar)
     
     y=timediff(tut,epoch2time(ep2000))/86400.0/365.25;
     
+    // 使用三次多项式来拟合 2000 年到 2010 年的平均极坐标
     if (y<3653.0/365.25) { /* until 2010.0 */
         y2=y*y; y3=y2*y;
         *xp_bar= 55.974+1.8243*y+0.18413*y2+0.007024*y3; /* (mas) */
         *yp_bar=346.346+1.7896*y-0.10729*y2-0.000908*y3;
     }
+    // 线性函数模型，拟合 2010 年以后的平均极坐标
     else { /* after 2010.0 */
         *xp_bar= 23.513+7.6141*y; /* (mas) */
         *yp_bar=358.891-0.6287*y;
@@ -187,10 +197,11 @@ static void tide_pole(gtime_t tut, const double *pos, const double *erpv,
     double xp_bar,yp_bar,m1,m2,cosl,sinl;
     
     trace(3,"tide_pole: pos=%.3f %.3f\n",pos[0]*R2D,pos[1]*R2D);
-    
+    // 计算平均极点坐标 xp_bar、yp_bar，后面用的时候会再乘 1E-3
     /* iers mean pole (mas) */
     iers_mean_pole(tut,&xp_bar,&yp_bar);
     
+    // 用 ERP 参数和平均极点坐标计算 m1、m2
     /* ref [7] eq.7.24 */
     m1= erpv[0]/AS2R-xp_bar*1E-3; /* (as) */
     m2=-erpv[1]/AS2R+yp_bar*1E-3;
@@ -242,9 +253,12 @@ extern void tidedisp(gtime_t tutc, const double *rr, int opt, const erp_t *erp,
     
     trace(3,"tidedisp: tutc=%s\n",time_str(tutc,0));
     
+    // 如果有 erp 参数，调用 geterp() 获取
     if (erp) {
         geterp(erp,utc2gpst(tutc),erpv);
     }
+
+    // UTC 加上 erpv[2] 得到 UT 时间 tut
     tut=timeadd(tutc,erpv[2]);
     
     dr[0]=dr[1]=dr[2]=0.0;
@@ -255,8 +269,8 @@ extern void tidedisp(gtime_t tutc, const double *rr, int opt, const erp_t *erp,
     pos[1]=atan2(rr[1],rr[0]);
     xyz2enu(pos,E);
     
+    // 调用 sunmoonpos() 计算日月 ECEF 坐标 rs、rm
     if (opt&1) { /* solid earth tides */
-        
         /* sun and moon position in ecef */
         sunmoonpos(tutc,erpv,rs,rm,&gmst);
         
@@ -270,15 +284,18 @@ extern void tidedisp(gtime_t tutc, const double *rr, int opt, const erp_t *erp,
         /* call DEHANTTIDEINEL */
         dehanttideinel_((double *)rr,&year,&mon,&day,&fhr,rs,rm,drt);
 #else
+        // 调用 tide_solid() 计算固体潮改正 drt，改正到 dr
         tide_solid(rs,rm,pos,E,gmst,opt,drt);
 #endif
         for (i=0;i<3;i++) dr[i]+=drt[i];
     }
+    // 调用 tide_oload() 计算海洋潮改正 drt，改正到 dr
     if ((opt&2)&&odisp) { /* ocean tide loading */
         tide_oload(tut,odisp,denu);
         matmul("TN",3,1,3,1.0,E,denu,0.0,drt);
         for (i=0;i<3;i++) dr[i]+=drt[i];
     }
+    // 调用 tide_pole() 极潮改正到 drt，改正到 dr
     if ((opt&4)&&erp) { /* pole tide */
         tide_pole(tut,pos,erpv,denu);
         matmul("TN",3,1,3,1.0,E,denu,0.0,drt);

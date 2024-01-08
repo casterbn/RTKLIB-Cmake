@@ -146,6 +146,9 @@ static const double ura_nominal[]={     /* URA nominal values */
     2.0,2.8,4.0,5.7,8.0,11.3,16.0,32.0,64.0,128.0,256.0,512.0,1024.0,
     2048.0,4096.0,8192.0
 };
+
+// 表示每种卫星系统的载波类型和观测值类型
+// 每种类型的系统其实对应的就是一个 sigind_t 结构体，也就是说只需要建立六个结构体就够了
 /* type definition -----------------------------------------------------------*/
 typedef struct {                        /* signal index type */
     int n;                              /* number of index */
@@ -160,11 +163,11 @@ typedef struct {                        /* signal index type */
 /* set string without tail space ---------------------------------------------*/
 static void setstr(char *dst, const char *src, int n)
 {
-    char *p=dst;
-    const char *q=src;
-    while (*q&&q<src+n) *p++=*q++;
+    char *p=dst;                    // 目标字符串
+    const char *q=src;              // 源字符串
+    while (*q&&q<src+n) *p++=*q++;  // 循环把 q 的前 n 个字符赋值给 p
     *p--='\0';
-    while (p>=dst&&*p==' ') *p--='\0';
+    while (p>=dst&&*p==' ') *p--='\0';  // 从后往前循环，把从后往前最后一个空格赋值\0，遇到不是空格就跳出循环
 }
 /* adjust time considering week handover -------------------------------------*/
 static gtime_t adjweek(gtime_t t, gtime_t t0)
@@ -187,9 +190,9 @@ static void timestr_rnx(char *str)
 {
     gtime_t time;
     double ep[6];
-    time=timeget();
+    time=timeget();         // 获取系统UTC时间
     time.sec=0.0;
-    time2epoch(time,ep);
+    time2epoch(time,ep);    // 将系统时间转为年月日时分秒数值
     sprintf(str,"%04.0f%02.0f%02.0f %02.0f%02.0f%02.0f UTC",ep[0],ep[1],ep[2],
             ep[3],ep[4],ep[5]);
 }
@@ -239,6 +242,8 @@ static int sisa_index(double value)
     else if (value<=2.0) return (int)((value-1.0)/0.04)+75;
     return ((int)(value-2.0)/0.16)+100;
 }
+
+// 初始化测站信息，将结构体 sta_t 中的字段都设为 0
 /* initialize station parameter ----------------------------------------------*/
 static void init_sta(sta_t *sta)
 {
@@ -350,8 +355,8 @@ static void decode_obsh(FILE *fp, char *buff, double ver, int *tsys,
                         char tobs[][MAXOBSTYPE][4], nav_t *nav, sta_t *sta)
 {
     /* default codes for unknown code */
-    const char frqcodes[]="1256789";
-    const char *defcodes[]={
+    const char frqcodes[]="1256789";        // 定义频率数组
+    const char *defcodes[]={                // 定义一个指针数组，不知道的编码直接采取默认字符串加空格的形式存储
         "CWX    ",  /* GPS: L125____ */
         "CCXX X ",  /* GLO: L1234_6_ */
         "C XXXX ",  /* GAL: L1_5678_ */
@@ -363,20 +368,21 @@ static void decode_obsh(FILE *fp, char *buff, double ver, int *tsys,
     double del[3];
     int i,j,k,n,nt,prn,fcn;
     const char *p;
-    char *label=buff+60,str[4];
+    char *label=buff+60,        // 读文件头标签，从 60 开始
+            str[4];
     
     trace(4,"decode_obsh: ver=%.2f\n",ver);
     
     if      (strstr(label,"MARKER NAME"         )) {
-        if (sta) setstr(sta->name,buff,60);
+        if (sta) setstr(sta->name,buff,60);     // 测站名，存到测站结构体 sta_t
     }
     else if (strstr(label,"MARKER NUMBER"       )) { /* opt */
         if (sta) setstr(sta->marker,buff,20);
     }
     else if (strstr(label,"MARKER TYPE"         )) ; /* ver.3 */
-    else if (strstr(label,"OBSERVER / AGENCY"   )) ;
+    else if (strstr(label,"OBSERVER / AGENCY"   )) ;    // 有很多 else if 后不做处理，空语句
     else if (strstr(label,"REC # / TYPE / VERS" )) {
-        if (sta) {
+        if (sta) {          // 在文件中各个信息占 20 个字符，因此每 20 赋值一次
             setstr(sta->recsno, buff,   20);
             setstr(sta->rectype,buff+20,20);
             setstr(sta->recver, buff+40,20);
@@ -389,12 +395,12 @@ static void decode_obsh(FILE *fp, char *buff, double ver, int *tsys,
         }
     }
     else if (strstr(label,"APPROX POSITION XYZ" )) {
-        if (sta) {
+        if (sta) {          // 这里的循环语句与上面类同，每14字符赋值一次
             for (i=0,j=0;i<3;i++,j+=14) sta->pos[i]=str2num(buff,j,14);
         }
     }
     else if (strstr(label,"ANTENNA: DELTA H/E/N")) {
-        if (sta) {
+        if (sta) {          // 记录天线各方向延迟
             for (i=0,j=0;i<3;i++,j+=14) del[i]=str2num(buff,j,14);
             sta->del[2]=del[0]; /* h */
             sta->del[0]=del[1]; /* e */
@@ -407,22 +413,26 @@ static void decode_obsh(FILE *fp, char *buff, double ver, int *tsys,
     else if (strstr(label,"ANTENNA: ZERODIR AZI")) ; /* opt ver.3 */
     else if (strstr(label,"ANTENNA: ZERODIR XYZ")) ; /* opt ver.3 */
     else if (strstr(label,"CENTER OF MASS: XYZ" )) ; /* opt ver.3 */
+
+    // ！！观测数据类型读取
     else if (strstr(label,"SYS / # / OBS TYPES" )) { /* ver.3 */
+        // 如果卫星系统不在 static const char syscodes[]="GREJSCI"；中输出错误消息
         if (!(p=strchr(syscodes,buff[0]))) {
             trace(2,"invalid system code: sys=%c\n",buff[0]);
             return;
         }
-        i=(int)(p-syscodes);
-        n=(int)str2num(buff,3,3);
-        for (j=nt=0,k=7;j<n;j++,k+=4) {
-            if (k>58) {
-                if (!fgets(buff,MAXRNXLEN,fp)) break;
+        i=(int)(p-syscodes);                // i 为系统在 syscodes[]="GREJSCI" 的下标
+        n=(int)str2num(buff,3,3);           // 一个系统下的观测值类型数量
+        for (j=nt=0,k=7;j<n;j++,k+=4) {     // 读取具体观测值类型，每行第 7 位开始，每次读 4 位
+            if (k>58) {     // 读完一行
+                if (!fgets(buff,MAXRNXLEN,fp)) break;   // 再读取一行
                 k=7;
             }
             if (nt<MAXOBSTYPE-1) setstr(tobs[i][nt++],buff+k,3);
         }
-        *tobs[i][nt]='\0';
+        *tobs[i][nt]='\0';      // 存储观测类型，分星座类型用三维数组进行存储【星座类型】【观测类型】【字符串数4】
         
+        // 北斗数据类型转换
         /* change BDS B1 code: 3.02 */
         if (i==5&&fabs(ver-3.02)<1e-3) {
             for (j=0;j<nt;j++) if (tobs[i][j][1]=='1') tobs[i][j][1]='2';
@@ -433,10 +443,12 @@ static void decode_obsh(FILE *fp, char *buff, double ver, int *tsys,
             if (!(p=strchr(frqcodes,tobs[i][j][1]))) continue;
             tobs[i][j][2]=defcodes[i][(int)(p-frqcodes)];
             trace(2,"set default for unknown code: sys=%c code=%s\n",buff[0],
-                  tobs[i][j]);
+                  tobs[i][j]);      // 如果没有该观测类型，就进行错误提示
         }
     }
     else if (strstr(label,"WAVELENGTH FACT L1/2")) ; /* opt ver.2 */
+
+    // rinex2 版本的观测类型存储
     else if (strstr(label,"# / TYPES OF OBSERV" )) { /* ver.2 */
         n=(int)str2num(buff,0,6);
         for (i=nt=0,j=10;i<n;i++,j+=6) {
@@ -445,6 +457,8 @@ static void decode_obsh(FILE *fp, char *buff, double ver, int *tsys,
                 j=10;
             }
             if (nt>=MAXOBSTYPE-1) continue;
+
+            // 将 rnx3 以下的版本的观测类型符号转化为 rnx3 的观测类型符号
             if (ver<=2.99) {
                 setstr(str,buff+j,2);
                 convcode(ver,SYS_GPS,str,tobs[0][nt]);
@@ -460,6 +474,8 @@ static void decode_obsh(FILE *fp, char *buff, double ver, int *tsys,
     }
     else if (strstr(label,"SIGNAL STRENGTH UNIT")) ; /* opt ver.3 */
     else if (strstr(label,"INTERVAL"            )) ; /* opt */
+
+    // 根据历元开始时间第 49-51 列判断星座类型
     else if (strstr(label,"TIME OF FIRST OBS"   )) {
         if      (!strncmp(buff+48,"GPS",3)) *tsys=TSYS_GPS;
         else if (!strncmp(buff+48,"GLO",3)) *tsys=TSYS_UTC;
@@ -491,6 +507,8 @@ static void decode_obsh(FILE *fp, char *buff, double ver, int *tsys,
             sta->glo_cp_bias[3]=str2num(buff,44,8);
         }
     }
+
+    // 记录跳秒，GLONASS 观测文件中独有
     else if (strstr(label,"LEAP SECONDS"        )) { /* opt */
         if (nav) {
             nav->utc_gps[4]=str2num(buff, 0,6);
@@ -514,6 +532,7 @@ static void decode_navh(char *buff, nav_t *nav)
     
     trace(4,"decode_navh:\n");
     
+    // 读取电离层模型参数
     if      (strstr(label,"ION ALPHA"           )) { /* opt ver.2 */
         if (nav) {
             for (i=0,j=2;i<4;i++,j+=12) nav->ion_gps[i]=str2num(buff,j,12);
@@ -561,6 +580,8 @@ static void decode_navh(char *buff, nav_t *nav)
             }
         }
     }
+
+    // 读取时间系统改正参数
     else if (strstr(label,"TIME SYSTEM CORR"    )) { /* opt ver.3 */
         if (nav) {
             if (!strncmp(buff,"GPUT",4)) {
@@ -608,6 +629,8 @@ static void decode_navh(char *buff, nav_t *nav)
             }
         }
     }
+
+    // 读取跳秒参数
     else if (strstr(label,"LEAP SECONDS"        )) { /* opt */
         if (nav) {
             nav->utc_gps[4]=str2num(buff, 0,6);
@@ -649,15 +672,17 @@ static int readrnxh(FILE *fp, double *ver, char *type, int *sys, int *tsys,
     
     *ver=2.10; *type=' '; *sys=SYS_GPS;
     
+    // while 循环，每次读取一行，直到读到 END OF HEADER
     while (fgets(buff,MAXRNXLEN,fp)) {
-        
+        // 判定观测文件头部分所有字符总长度是否正常
         if (strlen(buff)<=60) {
             continue;
         }
+        // 首先进行第一行版本号读取，记录版本号以及观测文件类型
         else if (strstr(label,"RINEX VERSION / TYPE")) {
             *ver=str2num(buff,0,9);
             *type=*(buff+20);
-            
+            // 通过定位字符位置读取字符，判断系统类型并记录
             /* satellite system */
             switch (*(buff+40)) {
                 case ' ':
@@ -681,6 +706,7 @@ static int readrnxh(FILE *fp, double *ver, char *type, int *sys, int *tsys,
         else if (strstr(label,"COMMENT")) {
             continue;
         }
+        // 通过判断文件类型分配不同函数读取文件头
         switch (*type) { /* file type */
             case 'O': decode_obsh(fp,buff,*ver,tsys,tobs,nav,sta); break;
             case 'N': decode_navh (buff,nav); break;
@@ -695,7 +721,17 @@ static int readrnxh(FILE *fp, double *ver, char *type, int *sys, int *tsys,
     }
     return 0;
 }
-/* decode observation epoch --------------------------------------------------*/
+
+// 解码历元首行数据（卫星数、卫星编号、历元状态），并将信息保存
+/* decode observation epoch --------------------------------------------------
+ * args:FILE *fp        I   传入的Rinex文件指针
+ *      char *buff      I   fgets()读取到一行数据的首地址
+ *      double ver      I   Rinex文件版本
+ *      gtime_t *time   O   历元时间
+ *      int *flag       O   epoh flag (o:ok,3:new site,4:header info,5:external event)
+ *      int *sats       O   历元卫星信息，2版本才有
+ * return：卫星数量
+ ----------------------------------------------------------------------------*/
 static int decode_obsepoch(FILE *fp, char *buff, double ver, gtime_t *time,
                            int *flag, int *sats)
 {
@@ -705,35 +741,36 @@ static int decode_obsepoch(FILE *fp, char *buff, double ver, gtime_t *time,
     trace(4,"decode_obsepoch: ver=%.2f\n",ver);
     
     if (ver<=2.99) { /* ver.2 */
-        if ((n=(int)str2num(buff,29,3))<=0) return 0;
+        if ((n=(int)str2num(buff,29,3))<=0) return 0;   // 读取卫星数到 n
         
         /* epoch flag: 3:new site,4:header info,5:external event */
-        *flag=(int)str2num(buff,28,1);
+        *flag=(int)str2num(buff,28,1);      // 读取 epoh flag
         
         if (3<=*flag&&*flag<=5) return n;
         
-        if (str2time(buff,0,26,time)) {
+        if (str2time(buff,0,26,time)) {     // 读取历元时间
             trace(2,"rinex obs invalid epoch: epoch=%26.26s\n",buff);
             return 0;
         }
-        for (i=0,j=32;i<n;i++,j+=3) {
-            if (j>=68) {
+        for (i=0,j=32;i<n;i++,j+=3) {       // 循环读取卫星ID(G10、G32、G26)
+            if (j>=68) {                    // 读到 68 列，还没把卫星读完，就 fgets() 读取新的一行
                 if (!fgets(buff,MAXRNXLEN,fp)) break;
                 j=32;
             }
             if (i<MAXOBS) {
                 strncpy(satid,buff+j,3);
-                sats[i]=satid2no(satid);
+                sats[i]=satid2no(satid);    // 将卫星ID转为 satellite number，存到 sats[] 数组中
             }
         }
     }
     else { /* ver.3 */
-        if ((n=(int)str2num(buff,32,3))<=0) return 0;
+        if ((n=(int)str2num(buff,32,3))<=0) return 0;   // 读取卫星数量
         
-        *flag=(int)str2num(buff,31,1);
+        *flag=(int)str2num(buff,31,1);      // 读取 epoh flag
         
         if (3<=*flag&&*flag<=5) return n;
         
+        // 识别历元第一个字符是否匹配以及历元时间是否可以正常转换，读取历元时间
         if (buff[0]!='>'||str2time(buff,1,28,time)) {
             trace(2,"rinex obs invalid epoch: epoch=%29.29s\n",buff);
             return 0;
@@ -742,7 +779,16 @@ static int decode_obsepoch(FILE *fp, char *buff, double ver, gtime_t *time,
     trace(4,"decode_obsepoch: time=%s flag=%d\n",time_str(*time,3),*flag);
     return n;
 }
-/* decode observation data ---------------------------------------------------*/
+
+// 解码观测数据
+/* decode observation data ---------------------------------------------------
+ * args:FILE *fp        I   传入的Rinex文件指针
+ *      char *buff      I   fgets()读取到一行数据的首地址
+ *      double ver      I   Rinex文件版本
+ *      int mask        I   卫星系统掩码
+ *      sigind_t *index I   观测数据类型索引
+ *      obsd_t *obs     O   观测数据OBS   
+ ----------------------------------------------------------------------------*/
 static int decode_obsdata(FILE *fp, char *buff, double ver, int mask,
                           sigind_t *index, obsd_t *obs)
 {
@@ -754,6 +800,7 @@ static int decode_obsdata(FILE *fp, char *buff, double ver, int mask,
     
     trace(4,"decode_obsdata: ver=%.2f\n",ver);
     
+    // 3 版本，读取卫星 satellite number 存到 obs->sat
     if (ver>2.99) { /* ver.3 */
         sprintf(satid,"%.3s",buff);
         obs->sat=(uint8_t)satid2no(satid);
@@ -762,9 +809,12 @@ static int decode_obsdata(FILE *fp, char *buff, double ver, int mask,
         trace(4,"decode_obsdata: unsupported sat sat=%s\n",satid);
         stat=0;
     }
+    // 卫星系统和 mask 做与运算，判断卫星系统是否启用
     else if (!(satsys(obs->sat,NULL)&mask)) {
         stat=0;
     }
+
+    // 根据卫星系统分配索引
     /* read observation data fields */
     switch (satsys(obs->sat,NULL)) {
         case SYS_GLO: ind=index+1; break;
@@ -775,23 +825,29 @@ static int decode_obsdata(FILE *fp, char *buff, double ver, int mask,
         case SYS_IRN: ind=index+6; break;
         default:      ind=index  ; break;
     }
+
+    // 根据索引 ind 中的观测值类型，循环读取观测值，读取一个历元内，一颗卫星的观测值
+    // 2 版本从 0 开始，3 版本从 3 开始，一次读取 16 个字符(每一个卫星的观测数据）
     for (i=0,j=ver<=2.99?0:3;i<ind->n;i++,j+=16) {
         
-        if (ver<=2.99&&j>=80) { /* ver.2 */
+        if (ver<=2.99&&j>=80) { /* ver.2 */             // 2 版本，一行读不完就 fgets 读下一行
             if (!fgets(buff,MAXRNXLEN,fp)) break;
             j=0;
         }
         if (stat) {
-            val[i]=str2num(buff,j,14)+ind->shift[i];
-            lli[i]=(uint8_t)str2num(buff,j+14,1)&3;
+            val[i]=str2num(buff,j,14)+ind->shift[i];    // 记录有效的观测值
+            lli[i]=(uint8_t)str2num(buff,j+14,1)&3;     // 记录信号失锁，判定周跳
         }
     }
     if (!stat) return 0;
     
+    // 初始化 obs 各观测值数组，赋空
     for (i=0;i<NFREQ+NEXOBS;i++) {
         obs->P[i]=obs->L[i]=0.0; obs->D[i]=0.0f;
         obs->SNR[i]=obs->LLI[i]=obs->code[i]=0;
     }
+
+    // 遍历观测值类型，同频率的观测码，下标分别存到 k[]，l[]
     /* assign position in observation data */
     for (i=n=m=0;i<ind->n;i++) {
         
@@ -802,6 +858,7 @@ static int decode_obsdata(FILE *fp, char *buff, double ver, int mask,
     }
     if (ver<=2.11) {
         
+        // 同一个频率有不同的观测码，取优先级高的
         /* if multiple codes (C1/P1,C2/P2), select higher priority */
         if (n>=2) {
             if (val[k[0]]==0.0&&val[k[1]]==0.0) {
@@ -838,6 +895,11 @@ static int decode_obsdata(FILE *fp, char *buff, double ver, int mask,
             }
         }
     }
+
+    // obs->P 代表着这个观测值结构体中的伪距观测值。不管是伪距观测值还是载波相位观测值和多普勒观测值，都是利用各种载波得到的
+    // obs->P[0] 就是利用 L1 载波观测到的伪距，obs->P[1] 就是利用 L2 载波观测到的伪距…
+    // 保存数据部分，每一个观测类型的组成包括：观测值（保留三位小数） + LLI + 信号强度，所以 obs 指向的三个可能代表的就是这三个
+    // 遍历观测值，存入 obs 中
     /* save observation data */
     for (i=0;i<ind->n;i++) {
         if (p[i]<0||val[i]==0.0) continue;
@@ -851,6 +913,8 @@ static int decode_obsdata(FILE *fp, char *buff, double ver, int mask,
     trace(4,"decode_obsdata: time=%s sat=%2d\n",time_str(obs->time,0),obs->sat);
     return 1;
 }
+
+// 把 data->LLI 中的周跳标记存到 slips 中
 /* save cycle slips ----------------------------------------------------------*/
 static void saveslips(uint8_t slips[][NFREQ+NEXOBS], obsd_t *data)
 {
@@ -859,6 +923,8 @@ static void saveslips(uint8_t slips[][NFREQ+NEXOBS], obsd_t *data)
         if (data->LLI[i]&1) slips[data->sat-1][i]|=LLI_SLIP;
     }
 }
+
+// 把 slips 中的周跳标记存到 data->LLI 中
 /* restore cycle slips -------------------------------------------------------*/
 static void restslips(uint8_t slips[][NFREQ+NEXOBS], obsd_t *data)
 {
@@ -868,6 +934,8 @@ static void restslips(uint8_t slips[][NFREQ+NEXOBS], obsd_t *data)
         slips[data->sat-1][i]=0;
     }
 }
+
+// 在 obs_t 类型的 obs 添加新的观测值 obsd_t 类型的 data，检验内存够不够，不够就realloc()
 /* add observation data ------------------------------------------------------*/
 static int addobsdata(obs_t *obs, const obsd_t *data)
 {
@@ -885,6 +953,9 @@ static int addobsdata(obs_t *obs, const obsd_t *data)
     obs->data[obs->n++]=*data;
     return 1;
 }
+
+// 从 opt 字符串中找系统掩码，-SYS= 后的系统都加到 mask 中，返回 mask，找不到 mask 则返回 SYS_ALL 全部系统
+// mask 中有的卫星系统，表示可以用
 /* set system mask -----------------------------------------------------------*/
 static int set_sysmask(const char *opt)
 {
@@ -906,7 +977,17 @@ static int set_sysmask(const char *opt)
     }
     return mask;
 }
-/* set signal index ----------------------------------------------------------*/
+
+// 将 tobs 数组中存的观测值类型信息存到 sigind_t 类型的 ind 结构体中
+/* set signal index ----------------------------------------------------------
+ * args:double ver                  RINEX文件版本号
+ *      int sys                     卫星所属系统
+ *      const char *opt             选项
+ *      char tobs[MAXOBSTYPE][4]    观测值类型数组 tobs[0]代表的是GPS系统的观测值类型,
+ *                                  tobs[0][0]代表着GPS系统的第一个观测值类型，如tobs[0][0]="C1C "，代表着GPS系统中利用L1载波上的C/A码测得的伪距
+ *                                  注意，一定是一个四位的字符串，因为在RINEX的格式说明中，每一个观测值类型占四位，包括了最后的一个空格
+ *      sigind_t *ind               得到的索引
+ ----------------------------------------------------------------------------*/
 static void set_index(double ver, int sys, const char *opt,
                       char tobs[MAXOBSTYPE][4], sigind_t *ind)
 {
@@ -915,10 +996,12 @@ static void set_index(double ver, int sys, const char *opt,
     double shift;
     int i,j,k,n;
     
+    // 遍历 tobs[]
     for (i=n=0;*tobs[i];i++,n++) {
-        ind->code[i]=obs2code(tobs[i]+1);
-        ind->type[i]=(p=strchr(obscodes,tobs[i][0]))?(int)(p-obscodes):0;
-        ind->idx[i]=code2idx(sys,ind->code[i]);
+        // code[i] 存观测值类型 CODE_XXX   obs2code()：传入code string ("1C","1P","1Y",...)，返回obs code (CODE_???) 
+        ind->code[i]=obs2code(tobs[i]+1);               // tobs[i]+1 就是“C1C "中的"1C "子串
+        ind->type[i]=(p=strchr(obscodes,tobs[i][0]))?(int)(p-obscodes):0;   // 判断观测值种类是否存在，存在则赋值 ind->type
+        ind->idx[i]=code2idx(sys,ind->code[i]);         // 获取载波载波频率的下标赋值 ind->idx[i]
         ind->pri[i]=getcodepri(sys,ind->code[i],opt);
         ind->pos[i]=-1;
     }
@@ -941,6 +1024,8 @@ static void set_index(double ver, int sys, const char *opt,
                   tobs[i],shift);
         }
     }
+
+    // 为最高优先级观测值分配索引
     /* assign index for highest priority code */
     for (i=0;i<NFREQ;i++) {
         for (j=0,k=-1;j<n;j++) {
@@ -954,6 +1039,8 @@ static void set_index(double ver, int sys, const char *opt,
             if (ind->code[j]==ind->code[k]) ind->pos[j]=i;
         }
     }
+
+    // 分配扩展观测数据的索引
     /* assign index of extended observation data */
     for (i=0;i<NEXOBS;i++) {
         for (j=0;j<n;j++) {
@@ -979,7 +1066,18 @@ static void set_index(double ver, int sys, const char *opt,
     }
 #endif
 }
-/* read RINEX observation data body ------------------------------------------*/
+
+// 读取一个观测历元的观测数据
+/* read RINEX observation data body ------------------------------------------
+ * args:FILE *fp    I               I   传入的Rinex文件指针
+ *      const char *opt             I   选项
+ *      double ver                  I   Rinex文件版本
+ *      int *tsys                   I   时间系统
+ *      char tobs[][MAXOBSTYPE][4]  I   观测值类型数组
+ *      int *flag                   I   历元信息状态
+ *      obsd_t *data                O   obsd_t类型的观测值数组
+ *      sta_t *sta                  O   卫星数组
+ ------------------------------------------------------------------------------*/
 static int readrnxobsb(FILE *fp, const char *opt, double ver, int *tsys,
                        char tobs[][MAXOBSTYPE][4], int *flag, obsd_t *data,
                        sta_t *sta)
@@ -992,6 +1090,9 @@ static int readrnxobsb(FILE *fp, const char *opt, double ver, int *tsys,
     /* set system mask */
     mask=set_sysmask(opt);
     
+    // 调用 set_index()，每个系统建立一个索引
+    // 将三维观测值类型数组退化成二维数组，建立一个索引数组
+    // 通过判断 nsys 值对 set_index 进行传参，然后记录在 sigind_t 结构体中
     /* set signal index */
     if (nsys>=1) set_index(ver,SYS_GPS,opt,tobs[0],index  );
     if (nsys>=2) set_index(ver,SYS_GLO,opt,tobs[1],index+1);
@@ -1001,24 +1102,30 @@ static int readrnxobsb(FILE *fp, const char *opt, double ver, int *tsys,
     if (nsys>=6) set_index(ver,SYS_CMP,opt,tobs[5],index+5);
     if (nsys>=7) set_index(ver,SYS_IRN,opt,tobs[6],index+6);
     
+    // 利用 fgets() 函数缓存一行数据
     /* read record */
     while (fgets(buff,MAXRNXLEN,fp)) {
-        
+        // 记录一个观测历元的有效性、时间和卫星数
         /* decode observation epoch */
+        // 如果是第一行，则调用 decode_obsepoch() 函数解码首行数据（包括历元时刻、卫星数、卫星编号、历元状态等信息），并将信息保存
         if (i==0) {
             if ((nsat=decode_obsepoch(fp,buff,ver,&time,flag,sats))<=0) {
                 continue;
             }
         }
+
+        // 如果不是第一行则调用 decode_obsdata() 函数对该行观测数据进行数据解码
         else if ((*flag<=2||*flag==6)&&n<MAXOBS) {
             data[n].time=time;
             data[n].sat=(uint8_t)sats[i-1];
             
+            // 记录历元的数据部分
             /* decode RINEX observation data */
             if (decode_obsdata(fp,buff,ver,mask,index,data+n)) n++;
         }
         else if (*flag==3||*flag==4) { /* new site or header info follows */
             
+            // 读取文件头，例如可以将不同系统的星历放在一个文件当中当作混合星历来使用
             /* decode RINEX observation data file header */
             decode_obsh(fp,buff,ver,tsys,tobs,NULL,sta);
         }
@@ -1026,7 +1133,21 @@ static int readrnxobsb(FILE *fp, const char *opt, double ver, int *tsys,
     }
     return -1;
 }
-/* read RINEX observation data -----------------------------------------------*/
+
+// 读取 O 文件中整个观测值数据,重复调用 readrnxobsb() 函数，直到所有的观测值全被读完，或者是出现了某个历元没有卫星的情况为止
+/* read RINEX observation data -----------------------------------------------
+ * args:FILE *fp                    I   传入的 Rinex 文件指针
+ *      gtime_t ts                  I   开始时间
+ *      gtime_t te                  I   结束时间
+ *      double tint                 I   时间间隔
+ *      const char *opt             I   选项
+ *      int rcv                     I   接收机号
+ *      double ver                  I   Rinex 文件版本
+ *      int *tsys                   I   时间系统
+ *      char tobs[][MAXOBSTYPE][4]  I   观测值类型数组
+ *      obs_t *obs                  O   obsd_t 类型的观测值数组
+ *      sta_t *sta                  O   卫星数组
+ ----------------------------------------------------------------------------*/
 static int readrnxobs(FILE *fp, gtime_t ts, gtime_t te, double tint,
                       const char *opt, int rcv, double ver, int *tsys,
                       char tobs[][MAXOBSTYPE][4], obs_t *obs, sta_t *sta)
@@ -1041,20 +1162,24 @@ static int readrnxobs(FILE *fp, gtime_t ts, gtime_t te, double tint,
     
     if (!(data=(obsd_t *)malloc(sizeof(obsd_t)*MAXOBS))) return 0;
     
+    // 循环调用 readrnxobsb() 每次读一个历元的观测值
     /* read RINEX observation data body */
     while ((n=readrnxobsb(fp,opt,ver,tsys,tobs,&flag,data,sta))>=0&&stat>=0) {
         
         for (i=0;i<n;i++) {
             
-            /* UTC -> GPST */
+            /* UTC -> GPST */       // 如果是 UTC 时间，转为 GPST
             if (*tsys==TSYS_UTC) data[i].time=utc2gpst(data[i].time);
             
-            /* save cycle slip */
+            /* save cycle slip */   // 调用 saveslips() 保存周跳标记 LLI 到 slips
             saveslips(slips,data+i);
         }
+
+        // 调用 screent() 按判断观测值是否在解算时间内
         /* screen data by time */
         if (n>0&&!screent(data[0].time,ts,te,tint)) continue;
         
+        // 遍历 data[]，将信息存到 obs 中
         for (i=0;i<n;i++) {
             
             /* restore cycle slip */
@@ -1062,6 +1187,8 @@ static int readrnxobs(FILE *fp, gtime_t ts, gtime_t te, double tint,
             
             data[i].rcv=(uint8_t)rcv;
             
+            // 调用 addobsdata()，在 obs_t 类型的 obs 添加新的观测值 obsd_t 类型的 data，
+            // 检验内存够不够，不够就 realloc()
             /* save obs data */
             if ((stat=addobsdata(obs,data+i))<0) break;
         }
@@ -1272,6 +1399,8 @@ static int decode_seph(double ver, int sat, gtime_t toc, double *data,
     
     return 1;
 }
+
+
 /* read RINEX navigation data body -------------------------------------------*/
 static int readrnxnavb(FILE *fp, const char *opt, double ver, int sys,
                        int *type, eph_t *eph, geph_t *geph, seph_t *seph)
@@ -1283,9 +1412,11 @@ static int readrnxnavb(FILE *fp, const char *opt, double ver, int sys,
     
     trace(4,"readrnxnavb: ver=%.2f sys=%d\n",ver,sys);
     
+    // 设置卫星系统掩码
     /* set system mask */
     mask=set_sysmask(opt);
     
+    // 循环读取一行行，读取到 data[]，i 记录读取的数据数量，读够数量进入 decode_eph() 赋值给 eph_t 结构体
     while (fgets(buff,MAXRNXLEN,fp)) {
         
         if (i==0) {
@@ -1294,7 +1425,7 @@ static int readrnxnavb(FILE *fp, const char *opt, double ver, int sys,
             if (ver>=3.0||sys==SYS_GAL||sys==SYS_QZS) { /* ver.3 or GAL/QZS */
                 sprintf(id,"%.3s",buff);
                 sat=satid2no(id);
-                sp=4;
+                sp=4;                   // 3以上版本，GALileo，QZSS sp 都为 4
                 if (ver>=3.0) {
                     sys=satsys(sat,NULL);
                     if (!sys) {
@@ -1317,18 +1448,18 @@ static int readrnxnavb(FILE *fp, const char *opt, double ver, int sys,
                 else sat=satno(SYS_GPS,prn);
             }
             /* decode Toc field */
-            if (str2time(buff+sp,0,19,&toc)) {
+            if (str2time(buff+sp,0,19,&toc)) {      // 读取卫星钟时间 TOC
                 trace(2,"rinex nav toc error: %23.23s\n",buff);
                 return 0;
             }
             /* decode data fields */
-            for (j=0,p=buff+sp+19;j<3;j++,p+=19) {
+            for (j=0,p=buff+sp+19;j<3;j++,p+=19) {  // 首行数据读 3 列，除了 TOC 还有 3 列
                 data[i++]=str2num(p,0,19);
             }
         }
         else {
             /* decode data fields */
-            for (j=0,p=buff+sp;j<4;j++,p+=19) {
+            for (j=0,p=buff+sp;j<4;j++,p+=19) {     // 其它行数据都读 4 列
                 data[i++]=str2num(p,0,19);
             }
             /* decode ephemeris */
@@ -1351,6 +1482,8 @@ static int readrnxnavb(FILE *fp, const char *opt, double ver, int sys,
     }
     return -1;
 }
+
+// 判断结构体的大小是否够用，然后将新一个卫星的星历添加到原有的观测值结构体中
 /* add ephemeris to navigation data ------------------------------------------*/
 static int add_eph(nav_t *nav, const eph_t *eph)
 {
@@ -1413,6 +1546,7 @@ static int readrnxnav(FILE *fp, const char *opt, double ver, int sys,
     
     if (!nav) return 0;
     
+    // 调用 readrnxnavb() 读取文件，然后根据星历类型选择函数保存
     /* read RINEX navigation data body */
     while ((stat=readrnxnavb(fp,opt,ver,sys,&type,&eph,&geph,&seph))>=0) {
         
@@ -1482,6 +1616,8 @@ static int readrnxclk(FILE *fp, const char *opt, int index, nav_t *nav)
     }
     return nav->nc>0;
 }
+
+// 真正能够读取真个 RINEX 文件的函数，它能读取包括o文件，n文件等等的一系列文件，也就是之前函数的整合
 /* read RINEX file -----------------------------------------------------------*/
 static int readrnxfp(FILE *fp, gtime_t ts, gtime_t te, double tint,
                      const char *opt, int flag, int index, char *type,
@@ -1493,14 +1629,17 @@ static int readrnxfp(FILE *fp, gtime_t ts, gtime_t te, double tint,
     
     trace(3,"readrnxfp: flag=%d index=%d\n",flag,index);
     
-    /* read RINEX file header */
+    // 调用 readrnxh() 读取 rinex 头文件
+    /* read RINEX file header */        
     if (!readrnxh(fp,&ver,type,&sys,&tsys,tobs,nav,sta)) return 0;
     
+    // 调用 readrnxh() 读取文件头第一行获得
     /* flag=0:except for clock,1:clock */
     if ((!flag&&*type=='C')||(flag&&*type!='C')) return 0;
     
+    // 读取观测文件体
     /* read RINEX file body */
-    switch (*type) {
+    switch (*type) {            // 通过判断头文件识别的 type 进行分类读取
         case 'O': return readrnxobs(fp,ts,te,tint,opt,index,ver,&tsys,tobs,obs,
                                     sta);
         case 'N': return readrnxnav(fp,opt,ver,sys    ,nav);
@@ -1513,6 +1652,8 @@ static int readrnxfp(FILE *fp, gtime_t ts, gtime_t te, double tint,
     trace(2,"unsupported rinex type ver=%.2f type=%c\n",ver,*type);
     return 0;
 }
+
+// 调用 rtk_uncompress() 解压文件，调用 readrnxfp() 读取文件
 /* uncompress and read RINEX file --------------------------------------------*/
 static int readrnxfile(const char *file, gtime_t ts, gtime_t te, double tint,
                        const char *opt, int flag, int index, char *type,
@@ -1526,21 +1667,23 @@ static int readrnxfile(const char *file, gtime_t ts, gtime_t te, double tint,
     
     if (sta) init_sta(sta);
     
-    /* uncompress file */
+    /* uncompress file */       // 解压文件 file 到 tmpfile
     if ((cstat=rtk_uncompress(file,tmpfile))<0) {
         trace(2,"rinex file uncompact error: %s\n",file);
         return 0;
     }
+    // 以读的方式打开解压后的文件
     if (!(fp=fopen(cstat?tmpfile:file,"r"))) {
         trace(2,"rinex file open error: %s\n",cstat?tmpfile:file);
         return 0;
     }
+    // 调用 readrnxfp()，从文件描述符 fp 中读取文件
     /* read RINEX file */
     stat=readrnxfp(fp,ts,te,tint,opt,flag,index,type,obs,nav,sta);
     
     fclose(fp);
     
-    /* delete temporary file */
+    /* delete temporary file */     // 删除 tmpfile
     if (cstat) remove(tmpfile);
     
     return stat;
@@ -1589,24 +1732,28 @@ extern int readrnxt(const char *file, int rcv, gtime_t ts, gtime_t te,
     
     trace(3,"readrnxt: file=%s rcv=%d\n",file,rcv);
     
+    // 如果传入 file 为空，调用 readrnxfp() 从标准输入读取
     if (!*file) {
         return readrnxfp(stdin,ts,te,tint,opt,0,1,&type,obs,nav,sta);
     }
-    for (i=0;i<MAXEXFILE;i++) {
+    for (i=0;i<MAXEXFILE;i++) {     // 为 files[] 开辟空间
         if (!(files[i]=(char *)malloc(1024))) {
             for (i--;i>=0;i--) free(files[i]);
             return -1;
         }
     }
+    // 调用 expath() 展开 file 路径中的通配符*到 files[]
     /* expand wild-card */
     if ((n=expath(file,files,MAXEXFILE))<=0) {
         for (i=0;i<MAXEXFILE;i++) free(files[i]);
         return 0;
     }
+    // 调用 readrnxfile()，循环解压读取 files[]
     /* read rinex files */
     for (i=0;i<n&&stat>=0;i++) {
         stat=readrnxfile(files[i],ts,te,tint,opt,0,rcv,&type,obs,nav,sta);
     }
+    // 如果测站名字为空，就给依据头文件自动赋 4 个字符的名字
     /* if station name empty, set 4-char name from file head */
     if (type=='O'&&sta) {
         if (!(p=strrchr(file,FILEPATHSEP))) p=file-1;
@@ -1616,6 +1763,8 @@ extern int readrnxt(const char *file, int rcv, gtime_t ts, gtime_t te,
     
     return stat;
 }
+
+// 将时间都设为 0，调用 readrnxt() 读取文件
 extern int readrnx(const char *file, int rcv, const char *opt, obs_t *obs,
                    nav_t *nav, sta_t *sta)
 {
@@ -1680,15 +1829,19 @@ extern int readrnxc(const char *file, nav_t *nav)
     
     trace(3,"readrnxc: file=%s\n",file);
     
+    // 为 files[] 开辟空间
     for (i=0;i<MAXEXFILE;i++) {
         if (!(files[i]=(char *)malloc(1024))) {
             for (i--;i>=0;i--) free(files[i]);
             return 0;
         }
     }
+
+    // 展开 file 路径的*到 files[]
     /* expand wild-card */
     n=expath(file,files,MAXEXFILE);
     
+    // 遍历 files，调用 readrnxfile() 读取
     /* read rinex clock files */
     for (i=0;i<n;i++) {
         if (readrnxfile(files[i],t,t,0.0,"",1,index++,&type,NULL,nav,NULL)) {
@@ -1701,11 +1854,14 @@ extern int readrnxc(const char *file, nav_t *nav)
     
     if (!stat) return 0;
     
+    // 调用 combpclk() 合并精密钟差
     /* unique and combine ephemeris and precise clock */
     combpclk(nav);
     
     return nav->nc;
 }
+
+// 将上述的结构体 rnxctr_t 进行初始化，即将指针指向新开辟的内存空间，将其中的各个参数置零
 /* initialize RINEX control ----------------------------------------------------
 * initialize RINEX control struct and reallocate memory for observation and
 * ephemeris buffer in RINEX control struct
@@ -1766,6 +1922,8 @@ extern void free_rnxctr(rnxctr_t *rnx)
     free(rnx->nav.geph); rnx->nav.geph=NULL; rnx->nav.ng=0;
     free(rnx->nav.seph); rnx->nav.seph=NULL; rnx->nav.ns=0;
 }
+
+// 将 RINEX 文件头中的信息读入 rnx 参数中
 /* open RINEX data -------------------------------------------------------------
 * fetch next RINEX message and input a messsage from file
 * args   : rnxctr_t *rnx IO  RINEX control struct
@@ -1801,6 +1959,8 @@ extern int open_rnxctr(rnxctr_t *rnx, FILE *fp)
     rnx->ephset=rnx->ephsat=0;
     return 1;
 }
+
+// 将 RINEX 文件体的信息读入 rnx 中
 /* input RINEX control ---------------------------------------------------------
 * fetch next RINEX message and input a messsage from file
 * args   : rnxctr_t *rnx    IO  RINEX control struct

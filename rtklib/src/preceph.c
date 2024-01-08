@@ -592,12 +592,12 @@ extern void satantoff(gtime_t time, const double *rs, int sat, const nav_t *nav,
     
     /* unit vectors of satellite fixed coordinates */
     for (i=0;i<3;i++) r[i]=-rs[i];
-    if (!normv3(r,ez)) return;
+    if (!normv3(r,ez)) return;              // (E.8.5)
     for (i=0;i<3;i++) r[i]=rsun[i]-rs[i];
-    if (!normv3(r,es)) return;
+    if (!normv3(r,es)) return;              // (E.8.6)
     cross3(ez,es,r);
-    if (!normv3(r,ey)) return;
-    cross3(ey,ez,ex);
+    if (!normv3(r,ey)) return;              // (E.8.7)
+    cross3(ey,ez,ex);                       // (E.8.8)
     
     /* iono-free LC coefficients */
     sys=satsys(sat,NULL);

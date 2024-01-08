@@ -53,10 +53,10 @@
 #define MAXINFILE   1000         /* max number of input files */
 
 /* constants/global variables ------------------------------------------------*/
-static pcvs_t pcvss={0};        /* receiver antenna parameters */
-static pcvs_t pcvsr={0};        /* satellite antenna parameters */
-static obs_t obss={0};          /* observation data */
-static nav_t navs={0};          /* navigation data */
+static pcvs_t pcvss={0};        /* receiver antenna parameters */                   // 接收机天线相位改正参数
+static pcvs_t pcvsr={0};        /* satellite antenna parameters */                  // 卫星天线相位改正参数
+static obs_t obss={0};          /* observation data */                              // 观测值
+static nav_t navs={0};          /* navigation data */                               // 导航电文
 static sbs_t sbss={0};          /* sbas messages */
 static sta_t stas[MAXRCV];      /* station infomation */
 static int nepoch=0;            /* number of observation epochs */
@@ -95,7 +95,7 @@ static int checkbrk(const char *format, ...)
     return showmsg(buff);
 }
 
-// 输出基准站坐标
+// 输出指定格式的基准站坐标
 /* output reference position -------------------------------------------------*/
 static void outrpos(FILE *fp, const double *r, const solopt_t *opt)
 {
@@ -122,6 +122,8 @@ static void outrpos(FILE *fp, const double *r, const solopt_t *opt)
         fprintf(fp,"%14.4f%s%14.4f%s%14.4f",r[0],sep,r[1],sep,r[2]);
     }
 }
+
+// 输出结果文件的文件头
 /* output header -------------------------------------------------------------*/
 static void outheader(FILE *fp, char **file, int n, const prcopt_t *popt,
                       const solopt_t *sopt)
@@ -138,6 +140,8 @@ static void outheader(FILE *fp, char **file, int n, const prcopt_t *popt,
     if (sopt->posf==SOLF_NMEA||sopt->posf==SOLF_STAT) {
         return;
     }
+
+    // 输出结果文件开头的程序信息
     if (sopt->outhead) {
         if (!*sopt->prog) {
             fprintf(fp,"%s program   : RTKLIB ver.%s\n",COMMENTH,VER_RTKLIB);
@@ -176,23 +180,30 @@ static void outheader(FILE *fp, char **file, int n, const prcopt_t *popt,
     }
     if (sopt->outhead||sopt->outopt) fprintf(fp,"%s\n",COMMENTH);
     
+    // 调用 outsolhead() 输出各结果字段的含义
     outsolhead(fp,sopt);
 }
 
-
+// 寻找下一个时刻的观测值下标，从 i 开始向后的 n 个观测值
+// obs->data 的元素已经用sortobs()，根据 time, rcv, sat 排序、去重了
 /* search next observation data index ----------------------------------------*/
 static int nextobsf(const obs_t *obs, int *i, int rcv)
 {
     double tt;
     int n;
     
+    // 遍历 obs ，一直正向 i++，找 rcv 对应的观测值，从 i 开始向前的 n 个观测值
     for (;*i<obs->n;(*i)++) if (obs->data[*i].rcv==rcv) break;
+
+    // 在 i 的基础上加 n++，遍历 obs ，直到流动站变了或时间差大于 DTTOL，找到到这一个时刻观测值的结尾
     for (n=0;*i+n<obs->n;n++) {
-        tt=timediff(obs->data[*i+n].time,obs->data[*i].time);
-        if (obs->data[*i+n].rcv!=rcv||tt>DTTOL) break;
+        tt=timediff(obs->data[*i+n].time,obs->data[*i].time);   // 求 i+n 位数据与i数据的时间差 tt
+        if (obs->data[*i+n].rcv!=rcv||tt>DTTOL) break;          // 时间不同或 rcv 不同，则结束循环
     }
     return n;
 }
+
+// 与 nextobsf() 相反，寻找上一个时刻的观测值下标
 static int nextobsb(const obs_t *obs, int *i, int rcv)
 {
     double tt;
@@ -205,6 +216,9 @@ static int nextobsb(const obs_t *obs, int *i, int rcv)
     }
     return n;
 }
+
+// 传入时间更新 rtcm.ssr 
+// SRR 状态空间域（State Space Representation,SSR ）增强服务，常用于实时 PPP，需要实时获取
 /* update rtcm ssr correction ------------------------------------------------*/
 static void update_rtcm_ssr(gtime_t time)
 {
@@ -241,12 +255,22 @@ static void update_rtcm_ssr(gtime_t time)
         }
     }
 }
+
+// 取下一个历元的观测数据到 obss，先流动站再基准站，共 n 个
 /* input obs data, navigation messages and sbas correction -------------------*/
 static int inputobs(obsd_t *obs, int solq, const prcopt_t *popt)
 {
     gtime_t time={0};
-    int i,nu,nr,n=0;
+    int i,  
+        nu,     // 当前历元流动站观测值数
+        nr      // 当前历元基准站观测值数
+        ,n=0;   // 观测值下标
     
+    // iobsu ：流动站当前历元索引
+    // iobsr ：基准站当前历元索引
+    // isbs  ：SBAS信息索引
+    // revs  ：0:forward 1:backward
+
     trace(3,"infunc  : revs=%d iobsu=%d iobsr=%d isbs=%d\n",revs,iobsu,iobsr,isbs);
     
     if (0<=iobsu&&iobsu<obss.n) {
@@ -255,6 +279,8 @@ static int inputobs(obsd_t *obs, int solq, const prcopt_t *popt)
             aborts=1; showmsg("aborted"); return -1;
         }
     }
+
+    // 如果是前向滤波
     if (!revs) { /* input forward data */
         if ((nu=nextobsf(&obss,&iobsu,1))<=0) return -1;
         if (popt->intpref) {
@@ -269,8 +295,8 @@ static int inputobs(obsd_t *obs, int solq, const prcopt_t *popt)
         if (nr<=0) {
             nr=nextobsf(&obss,&iobsr,2);
         }
-        for (i=0;i<nu&&n<MAXOBS*2;i++) obs[n++]=obss.data[iobsu+i];
-        for (i=0;i<nr&&n<MAXOBS*2;i++) obs[n++]=obss.data[iobsr+i];
+        for (i=0;i<nu&&n<MAXOBS*2;i++) obs[n++]=obss.data[iobsu+i];     // 循环 nu 次，把流动站同一时间、接收机不同卫星的数据加入obs[]
+        for (i=0;i<nr&&n<MAXOBS*2;i++) obs[n++]=obss.data[iobsr+i];     // 循环 nr 次，把基准站的数据加入obs[]
         iobsu+=nu;
         
         /* update sbas corrections */
@@ -288,6 +314,8 @@ static int inputobs(obsd_t *obs, int solq, const prcopt_t *popt)
             update_rtcm_ssr(obs[0].time);
         }
     }
+
+    // 如果是反向滤波
     else { /* input backward data */
         if ((nu=nextobsb(&obss,&iobsu,1))<=0) return -1;
         if (popt->intpref) {
@@ -314,15 +342,20 @@ static int inputobs(obsd_t *obs, int solq, const prcopt_t *popt)
             isbs--;
         }
     }
+
+    // 返回当前历元基准站、流动站观测值总数
     return n;
 }
+
+// ssr 载波相位改正
 /* carrier-phase bias correction by ssr --------------------------------------*/
 static void corr_phase_bias_ssr(obsd_t *obs, int n, const nav_t *nav)
 {
     double freq;
     uint8_t code;
     int i,j;
-    
+
+    // 遍历每个观测值每个频率
     for (i=0;i<n;i++) for (j=0;j<NFREQ;j++) {
         code=obs[i].code[j];
         
@@ -332,7 +365,17 @@ static void corr_phase_bias_ssr(obsd_t *obs, int n, const nav_t *nav)
         obs[i].L[j]-=nav->ssr[obs[i].sat-1].pbias[code-1]*freq/CLIGHT;
     }
 }
-/* process positioning -------------------------------------------------------*/
+
+// 从这个函数开始正式对整个流动站和基准站的观测文件内的数据进行逐历元处理
+// 每次循环都通过inputobs () 函数读取一个历元的数据，并调用 rtkpos() 函数对该历元的数据进行解算
+// 如果是哪个历元出现解算错误，一般都从这个函数开始设置断点向后进行调试
+/* process positioning -------------------------------------------------------
+ * args:FILE *fp	   		   I/O 输出结果文件指针
+ *      const prcopt_t *popt    I   处理选项结构体
+ *      const solopt_t *sopt    I   结果选项结构体
+ *      const filopt_t *fopt    I   文件选项结构体
+ *      int mode			    I   0：forward/backward、1：combined
+ ----------------------------------------------------------------------------*/
 static void procpos(FILE *fp, const prcopt_t *popt, const solopt_t *sopt,
                     int mode)
 {
@@ -345,28 +388,39 @@ static void procpos(FILE *fp, const prcopt_t *popt, const solopt_t *sopt,
     
     trace(3,"procpos : mode=%d\n",mode);
     
+    // 先判断结果是否为静态，处理选项和结果选项都为静态才算静态
     solstatic=sopt->solstatic&&
               (popt->mode==PMODE_STATIC||popt->mode==PMODE_PPP_STATIC);
     
+    // 初始化rtk_t，主要是将处理选项结构体 popt 赋值给 rtk 的部分成员
     rtkinit(&rtk,popt);
     rtcm_path[0]='\0';
     
+    // 对每一个历元进行遍历求解和输出
+    // 获取当前历元观测值数 nobs 以及当前历元各观测记录 obs[MAXOBS*2]
     while ((nobs=inputobs(obs,rtk.sol.stat,popt))>=0) {
         
         /* exclude satellites */
         for (i=n=0;i<nobs;i++) {
+            // 排除禁用卫星的观测值
+            // satsys()：传入连续的卫星编号 satellite number
+            // 返回卫星系统(SYS_GPS,SYS_GLO,...) ，通过传入的指针 prn 传出 PRN 码
             if ((satsys(obs[i].sat,NULL)&popt->navsys)&&
                 popt->exsats[obs[i].sat-1]!=1) obs[n++]=obs[i];
         }
         if (n<=0) continue;
         
+        // 如果 ppp 模式设置了 fractional cycle bias 相位的小数轴偏差
         /* carrier-phase bias correction */
         if (!strstr(popt->pppopt,"-ENA_FCB")) {
             corr_phase_bias_ssr(obs,n,&navs);
         }
+        // 调用 rtkpos() 进行解算
         if (!rtkpos(&rtk,obs,n,&navs)) continue;
         
+        // 单 forward/backward 模式
         if (mode==0) { /* forward/backward */
+            // 不是静态模式就直接输出结果
             if (!solstatic) {
                 outsol(fp,&rtk.sol,rtk.rb,sopt);
             }
@@ -374,7 +428,7 @@ static void procpos(FILE *fp, const prcopt_t *popt, const solopt_t *sopt,
                 sol=rtk.sol;
                 for (i=0;i<3;i++) rb[i]=rtk.rb[i];
                 if (time.time==0||timediff(rtk.sol.time,time)<0.0) {
-                    time=rtk.sol.time;
+                    time=rtk.sol.time;  // 记录上一历元的时间
                 }
             }
         }
@@ -397,6 +451,8 @@ static void procpos(FILE *fp, const prcopt_t *popt, const solopt_t *sopt,
     }
     rtkfree(&rtk);
 }
+
+// 判断 combine() 结果的有效性，四倍标准差以内有效
 /* validation of combined solutions ------------------------------------------*/
 static int valcomb(const sol_t *solf, const sol_t *solb)
 {
@@ -408,9 +464,10 @@ static int valcomb(const sol_t *solf, const sol_t *solb)
     
     /* compare forward and backward solution */
     for (i=0;i<3;i++) {
-        dr[i]=solf->rr[i]-solb->rr[i];
-        var[i]=solf->qr[i]+solb->qr[i];
+        dr[i]=solf->rr[i]-solb->rr[i];      // 坐标值差 dr 为两坐标相减
+        var[i]=solf->qr[i]+solb->qr[i];     // 方差 car 为两相加
     }
+    // dr 在限差四倍标准差之内，就合格 return 1，否则 return 0
     for (i=0;i<3;i++) {
         if (dr[i]*dr[i]<=16.0*var[i]) continue; /* ok if in 4-sigma */
         
@@ -421,6 +478,8 @@ static int valcomb(const sol_t *solf, const sol_t *solb)
     }
     return 1;
 }
+
+// 加权平均合并前后向滤波的结果
 /* combine forward/backward solutions and output results ---------------------*/
 static void combres(FILE *fp, const prcopt_t *popt, const solopt_t *sopt)
 {
@@ -431,21 +490,30 @@ static void combres(FILE *fp, const prcopt_t *popt, const solopt_t *sopt)
     
     trace(3,"combres : isolf=%d isolb=%d\n",isolf,isolb);
     
+    // 判断静态模式，处理选项和结果选项都得为静态
     solstatic=sopt->solstatic&&
               (popt->mode==PMODE_STATIC||popt->mode==PMODE_PPP_STATIC);
     
+    // i：从前到后，取前向滤波的结果
+    // j：从后到前，取后向滤波的结果
     for (i=0,j=isolb-1;i<isolf&&j>=0;i++,j--) {
-        
-        if ((tt=timediff(solf[i].time,solb[j].time))<-DTTOL) {
+        // 判断前后向滤波结果的时间差，时间差大于 DTTOL
+        // sols、rbs 取时间早的结果，另一个结果的下标不变，进行下一次循环的判断
+        if ((tt=timediff(solf[i].time,solb[j].time))<-DTTOL) {      // 如果前向时间迟于后向时间
             sols=solf[i];
+            // 把前向基站坐标赋值给 rbs[]
             for (k=0;k<3;k++) rbs[k]=rbf[k+i*3];
-            j++;
+            j++;    // 每次循环都要 j++，这里 j--，相当于保持不变
         }
+        // 如果前向时间早于后向时间
         else if (tt>DTTOL) {
             sols=solb[j];
+            // 把后向基站坐标赋值给 rbs[]
             for (k=0;k<3;k++) rbs[k]=rbb[k+j*3];
-            i--;
+            i--;        // i 不变
         }
+
+        // 时间差很小，solution status 不同，sols、rbs 取 solution status 小的结果
         else if (solf[i].stat<solb[j].stat) {
             sols=solf[i];
             for (k=0;k<3;k++) rbs[k]=rbf[k+i*3];
@@ -454,27 +522,32 @@ static void combres(FILE *fp, const prcopt_t *popt, const solopt_t *sopt)
             sols=solb[j];
             for (k=0;k<3;k++) rbs[k]=rbb[k+j*3];
         }
+        // 时间差很小，solution status 相同
         else {
-            sols=solf[i];
-            sols.time=timeadd(sols.time,-tt/2.0);
+            sols=solf[i];                           // sols 取前向滤波结果
+            sols.time=timeadd(sols.time,-tt/2.0);   // 时间取前后向时间的平均
             
+            // 相对定位模式，若结果为固定解，调用 valcomb() 检验，如果失败将 fix 降级为 float
             if ((popt->mode==PMODE_KINEMA||popt->mode==PMODE_MOVEB)&&
                 sols.stat==SOLQ_FIX) {
                 
                 /* degrade fix to float if validation failed */
                 if (!valcomb(solf+i,solb+j)) sols.stat=SOLQ_FLOAT;
             }
+
+            // 赋值前后向协方差给 Qf、Qb，k+k*3 是取对角线元素
             for (k=0;k<3;k++) {
                 Qf[k+k*3]=solf[i].qr[k];
                 Qb[k+k*3]=solb[j].qr[k];
             }
-            Qf[1]=Qf[3]=solf[i].qr[3];
+            Qf[1]=Qf[3]=solf[i].qr[3];  // 赋值非对角线元素
             Qf[5]=Qf[7]=solf[i].qr[4];
             Qf[2]=Qf[6]=solf[i].qr[5];
             Qb[1]=Qb[3]=solb[j].qr[3];
             Qb[5]=Qb[7]=solb[j].qr[4];
             Qb[2]=Qb[6]=solb[j].qr[5];
             
+            // 调用 smoother() 进行前后向滤波结果结合，位置存在 sols.rr[]，方差存在 sols.qr[]
             if (popt->mode==PMODE_MOVEB) {
                 for (k=0;k<3;k++) rr_f[k]=solf[i].rr[k]-rbf[k+i*3];
                 for (k=0;k<3;k++) rr_b[k]=solb[j].rr[k]-rbb[k+j*3];
@@ -523,11 +596,15 @@ static void combres(FILE *fp, const prcopt_t *popt, const solopt_t *sopt)
             }
         }
     }
+
+    // 循环处理完之后，如果是静态模式且时间存在，调用 outsol() 输出结果
     if (solstatic&&time.time!=0.0) {
         sol.time=time;
         outsol(fp,&sol,rb,sopt);
     }
 }
+
+// 读取精密星历、SBAS 改正、TEC 格网、初始化 RTCM 解析
 /* read prec ephemeris, sbas data, tec grid and open rtcm --------------------*/
 static void readpreceph(char **infile, int n, const prcopt_t *prcopt,
                         nav_t *nav, sbs_t *sbs)
@@ -542,22 +619,22 @@ static void readpreceph(char **infile, int n, const prcopt_t *prcopt,
     nav->nc=nav->ncmax=0;
     sbs->n =sbs->nmax =0;
     
-    /* read precise ephemeris files */
+    /* read precise ephemeris files */      // 调用 readsp3() 读精密星历 sp3
     for (i=0;i<n;i++) {
         if (strstr(infile[i],"%r")||strstr(infile[i],"%b")) continue;
         readsp3(infile[i],nav,0);
     }
-    /* read precise clock files */
+    /* read precise clock files */          // 调用 readrnxc() 读精密钟差
     for (i=0;i<n;i++) {
         if (strstr(infile[i],"%r")||strstr(infile[i],"%b")) continue;
         readrnxc(infile[i],nav);
     }
-    /* read sbas message files */
+    /* read sbas message files */           // 调用 sbsreadmsg() 读取 SBAS 改正
     for (i=0;i<n;i++) {
         if (strstr(infile[i],"%r")||strstr(infile[i],"%b")) continue;
         sbsreadmsg(infile[i],prcopt->sbassatsel,sbs);
     }
-    /* allocate sbas ephemeris */
+    /* allocate sbas ephemeris */           // 给 SBAS 星历开辟空间
     nav->ns=nav->nsmax=NSATSBS*2;
     if (!(nav->seph=(seph_t *)malloc(sizeof(seph_t)*nav->ns))) {
          showmsg("error : sbas ephem memory allocation");
@@ -566,7 +643,7 @@ static void readpreceph(char **infile, int n, const prcopt_t *prcopt,
     }
     for (i=0;i<nav->ns;i++) nav->seph[i]=seph0;
     
-    /* set rtcm file and initialize rtcm struct */
+    /* set rtcm file and initialize rtcm struct */  
     rtcm_file[0]=rtcm_path[0]='\0'; fp_rtcm=NULL;
     
     for (i=0;i<n;i++) {
@@ -578,6 +655,8 @@ static void readpreceph(char **infile, int n, const prcopt_t *prcopt,
         }
     }
 }
+
+
 /* free prec ephemeris and sbas data -----------------------------------------*/
 static void freepreceph(nav_t *nav, sbs_t *sbs)
 {
@@ -598,7 +677,19 @@ static void freepreceph(nav_t *nav, sbs_t *sbs)
     if (fp_rtcm) fclose(fp_rtcm);
     free_rtcm(&rtcm);
 }
-/* read obs and nav data -----------------------------------------------------*/
+
+/* read obs and nav data -----------------------------------------------------
+ * args:gtime_t ts                  解算开始时间
+ *      gtime_t te                  解算结束时间
+ *      double ti                   解算时间间隔
+ *      char **infile               传入文件路径数组
+ *      const int *index            对应文件下标
+ *      int n                       infile[] 元素个数
+ *      const prcopt_t *prcopt      处理选项
+ *      obs_t *obs                  存观测数据 OBS
+ *      nav_t *nav                  存导航电文数据 NAV
+ *      sta_t *sta                  测站结构体，存观测文件头读取到的一部分的信息
+ -----------------------------------------------------------------------------*/
 static int readobsnav(gtime_t ts, gtime_t te, double ti, char **infile,
                       const int *index, int n, const prcopt_t *prcopt,
                       obs_t *obs, nav_t *nav, sta_t *sta)
@@ -607,18 +698,21 @@ static int readobsnav(gtime_t ts, gtime_t te, double ti, char **infile,
     
     trace(3,"readobsnav: ts=%s n=%d\n",time_str(ts,0),n);
     
+    // 初始化对所有数据指针
     obs->data=NULL; obs->n =obs->nmax =0;
     nav->eph =NULL; nav->n =nav->nmax =0;
     nav->geph=NULL; nav->ng=nav->ngmax=0;
     nav->seph=NULL; nav->ns=nav->nsmax=0;
     nepoch=0;
     
+    // 遍历 infile[]，调用 readrnxt() 读取文件
     for (i=0;i<n;i++) {
         if (checkbrk("")) return 0;
         
-        if (index[i]!=ind) {
-            if (obs->n>nobs) rcv++;
-            ind=index[i]; nobs=obs->n; 
+        if (index[i]!=ind) {                // 如果下标和上一次循环的不同
+            if (obs->n>nobs) rcv++;         // rcv=1:rover,2:reference
+            ind=index[i];                   // 记录当前 index[i] 值到 ind
+            nobs=obs->n;                    // 记录观测数据数到 obs->n
         }
         /* read rinex obs and nav file */
         if (readrnxt(infile[i],rcv,ts,te,ti,prcopt->rnxopt[rcv<=1?0:1],obs,nav,
@@ -638,9 +732,13 @@ static int readobsnav(gtime_t ts, gtime_t te, double ti, char **infile,
         trace(1,"\n");
         return 0;
     }
+
+    // 调用 sortobs()，根据 time, rcv, sat 
+    // 对 obs->data 的元素进行排序、去重，并且得到历元数 nepoch
     /* sort observation data */
     nepoch=sortobs(obs);
     
+    // 调用 uniqnav()，进行星历数据的排序去重
     /* delete duplicated ephemeris */
     uniqnav(nav);
     
@@ -656,6 +754,8 @@ static int readobsnav(gtime_t ts, gtime_t te, double ti, char **infile,
     }
     return 1;
 }
+
+// 释放 obs 和 nav
 /* free obs and nav data -----------------------------------------------------*/
 static void freeobsnav(obs_t *obs, nav_t *nav)
 {
@@ -666,6 +766,8 @@ static void freeobsnav(obs_t *obs, nav_t *nav)
     free(nav->geph); nav->geph=NULL; nav->ng=nav->ngmax=0;
     free(nav->seph); nav->seph=NULL; nav->ns=nav->nsmax=0;
 }
+
+// 通过 nav 和多个 obs 单点定位计算位置，存到 ra[] 中
 /* average of single position ------------------------------------------------*/
 static int avepos(double *ra, int rcv, const obs_t *obs, const nav_t *nav,
                   const prcopt_t *opt)
@@ -680,6 +782,7 @@ static int avepos(double *ra, int rcv, const obs_t *obs, const nav_t *nav,
     
     for (i=0;i<3;i++) ra[i]=0.0;
     
+    // for 循环调用 nextobsf() 每次取一个历元观测数据
     for (iobs=0;(m=nextobsf(obs,&iobs,rcv))>0;iobs+=m) {
         
         for (i=j=0;i<m&&i<MAXOBS;i++) {
@@ -689,6 +792,7 @@ static int avepos(double *ra, int rcv, const obs_t *obs, const nav_t *nav,
         }
         if (j<=0||!screent(data[0].time,ts,ts,1.0)) continue; /* only 1 hz */
         
+        // 单点定位，结果存到 sol，再加到 ra[]
         if (!pntpos(data,j,nav,opt,&sol,NULL,NULL,msg)) continue;
         
         for (i=0;i<3;i++) ra[i]+=sol.rr[i];
@@ -698,9 +802,13 @@ static int avepos(double *ra, int rcv, const obs_t *obs, const nav_t *nav,
         trace(1,"no average of base station position\n");
         return 0;
     }
+
+    // ra 除以历元数，得到平均位置
     for (i=0;i<3;i++) ra[i]/=n;
     return 1;
 }
+
+// 从文件中读取测站坐标
 /* station position from file ------------------------------------------------*/
 static int getstapos(const char *file, char *name, double *r)
 {
@@ -710,15 +818,18 @@ static int getstapos(const char *file, char *name, double *r)
     
     trace(3,"getstapos: file=%s name=%s\n",file,name);
     
+    // 以读的方式打开 file
     if (!(fp=fopen(file,"r"))) {
         trace(1,"station position file open error: %s\n",file);
         return 0;
     }
+    // 循环读取，每次读一行数据，到 \n 或者 256 位结束
     while (fgets(buff,sizeof(buff),fp)) {
+        // 如果在行中找到%，截断，赋值\0
         if ((p=strchr(buff,'%'))) *p='\0';
-        
+        // 格式化读取，测站位置存到 pos[3]，测站名存到 sname
         if (sscanf(buff,"%lf %lf %lf %s",pos,pos+1,pos+2,sname)<4) continue;
-        
+        // 逐字符转大写比较 name、sname
         for (p=sname,q=name;*p&&*q;p++,q++) {
             if (toupper((int)*p)!=toupper((int)*q)) break;
         }
@@ -734,6 +845,8 @@ static int getstapos(const char *file, char *name, double *r)
     trace(1,"no station position: %s %s\n",name,file);
     return 0;
 }
+
+// 天线相位中心位置，基准站位置
 /* antenna phase center position ---------------------------------------------*/
 static int antpos(prcopt_t *opt, int rcvno, const obs_t *obs, const nav_t *nav,
                   const sta_t *sta, const char *posfile)
@@ -744,12 +857,14 @@ static int antpos(prcopt_t *opt, int rcvno, const obs_t *obs, const nav_t *nav,
     
     trace(3,"antpos  : rcvno=%d\n",rcvno);
     
+    // 利用基准站的观测文件计算其SPP定位结果作为基准站的坐标
     if (postype==POSOPT_SINGLE) { /* average of single position */
         if (!avepos(rr,rcvno,obs,nav,opt)) {
             showmsg("error : station pos computation");
             return 0;
         }
     }
+    // 从 pos 文件读取基准站坐标
     else if (postype==POSOPT_FILE) { /* read from position file */
         name=stas[rcvno==1?0:1].name;
         if (!getstapos(posfile,name,rr)) {
@@ -757,12 +872,15 @@ static int antpos(prcopt_t *opt, int rcvno, const obs_t *obs, const nav_t *nav,
             return 0;
         }
     }
+    // 从基准站的 OBS 观测文件的文件头部分读取基准站坐标
     else if (postype==POSOPT_RINEX) { /* get from rinex header */
-        if (norm(stas[rcvno==1?0:1].pos,3)<=0.0) {
+        // 如果没有坐标数据，报错
+        if (norm(stas[rcvno==1?0:1].pos,3)<=0.0) {          
             showmsg("error : no position in rinex header");
             trace(1,"no position position in rinex header\n");
             return 0;
         }
+        // 天线相位中心偏差改正
         /* antenna delta */
         if (stas[rcvno==1?0:1].deltype==0) { /* enu */
             for (i=0;i<3;i++) del[i]=stas[rcvno==1?0:1].del[i];
@@ -777,24 +895,29 @@ static int antpos(prcopt_t *opt, int rcvno, const obs_t *obs, const nav_t *nav,
     }
     return 1;
 }
+
+// 
 /* open procssing session ----------------------------------------------------*/
 static int openses(const prcopt_t *popt, const solopt_t *sopt,
                    const filopt_t *fopt, nav_t *nav, pcvs_t *pcvs, pcvs_t *pcvr)
 {
     trace(3,"openses :\n");
     
+    // 调用 readpcv() 读取文件天线相位改正文件
     /* read satellite antenna parameters */
     if (*fopt->satantp&&!(readpcv(fopt->satantp,pcvs))) {
         showmsg("error : no sat ant pcv in %s",fopt->satantp);
         trace(1,"sat antenna pcv read error: %s\n",fopt->satantp);
         return 0;
     }
+    // 调用 readpcv() 读取接收机天线相位改正文件
     /* read receiver antenna parameters */
     if (*fopt->rcvantp&&!(readpcv(fopt->rcvantp,pcvr))) {
         showmsg("error : no rec ant pcv in %s",fopt->rcvantp);
         trace(1,"rec antenna pcv read error: %s\n",fopt->rcvantp);
         return 0;
     }
+    // 调用 opengeoid() 读取大地水准面数据
     /* open geoid data */
     if (sopt->geoid>0&&*fopt->geoid) {
         if (!opengeoid(sopt->geoid,fopt->geoid)) {
@@ -804,6 +927,7 @@ static int openses(const prcopt_t *popt, const solopt_t *sopt,
     }
     return 1;
 }
+// 
 /* close procssing session ---------------------------------------------------*/
 static void closeses(nav_t *nav, pcvs_t *pcvs, pcvs_t *pcvr)
 {
@@ -876,6 +1000,8 @@ static void readotl(prcopt_t *popt, const char *file, const sta_t *sta)
         readblq(file,sta[i].name,popt->odisp[i]);
     }
 }
+
+// 创建结果文件，输出结果文件的文件头
 /* write header to output file -----------------------------------------------*/
 static int outhead(const char *outfile, char **infile, int n,
                    const prcopt_t *popt, const solopt_t *sopt)
@@ -904,9 +1030,24 @@ static FILE *openfile(const char *outfile)
 {
     trace(3,"openfile: outfile=%s\n",outfile);
     
-    return !*outfile?stdout:fopen(outfile,"ab");
+    // ab：以追加的方式打开二进制文件
+    return !*outfile?stdout:fopen(outfile,"ab");    
 }
-/* execute processing session ------------------------------------------------*/
+
+//读取各种文件，并将文件中的内容赋值到程序的结构体内。然后，最重要的就是计算基准站的位置以及选择解算类型。
+/* execute processing session ------------------------------------------------
+ * args:gtime_t ts              I   处理的起始时间，写0表示不限制
+ *      gtime_t te              I   处理的起始时间，写0表示不限制
+ *      double ti               I   处理的间隔时间 (s)，写0表示不限制，全处理
+ *      const prcopt_t *popt    I   处理选项结构体
+ *      const solopt_t *sopt    I   结果选项结构体
+ *      const filopt_t *fopt    I   文件选项结构体
+ *      int flag                I   用于控制输出
+ *      char **infile           I   传入文件路径数组首地址
+ *      const int *index        I   传入文件路径数组首地址
+ *      int n                   I   传入文件数量
+ *      char *outfile           I   输出文件的路径，写0表示stdout终端
+ * ---------------------------------------------------------------------------*/
 static int execses(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
                    const solopt_t *sopt, const filopt_t *fopt, int flag,
                    char **infile, const int *index, int n, char *outfile)
@@ -917,6 +1058,7 @@ static int execses(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
     
     trace(3,"execses : n=%d outfile=%s\n",n,outfile);
     
+    // 创建 trace 文件，并设置 trace 等级
     /* open debug trace */
     if (flag&&sopt->trace>0) {
         if (*outfile) {
@@ -930,6 +1072,7 @@ static int execses(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
         traceopen(tracefile);
         tracelevel(sopt->trace);
     }
+    // 调用 readtec() 读取电离层 TEC 文件，TEC:Total electronic content 总电子含量
     /* read ionosphere data file */
     if (*fopt->iono&&(ext=strrchr(fopt->iono,'.'))) {
         if (strlen(ext)==4&&(ext[3]=='i'||ext[3]=='I')) {
@@ -937,6 +1080,8 @@ static int execses(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
             readtec(path,&navs,1);
         }
     }
+
+    // 读取地球自转参数 ERP 文件
     /* read erp data */
     if (*fopt->eop) {
         free(navs.erp.data); navs.erp.data=NULL; navs.erp.n=navs.erp.nmax=0;
@@ -946,23 +1091,31 @@ static int execses(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
             trace(2,"no erp data %s\n",path);
         }
     }
+
+    // 调用 readobsnav() 读取 OBS 和 NAV 文件
     /* read obs and nav data */
     if (!readobsnav(ts,te,ti,infile,index,n,&popt_,&obss,&navs,stas)) return 0;
     
+    // 调用 readdcb() 读取差分码偏差 DCB 参数
     /* read dcb parameters */
     if (*fopt->dcb) {
         reppath(fopt->dcb,path,ts,"","");
         readdcb(path,&navs,stas);
     }
+
+    // 调用 setpcv() 设置天线相位中心变化参数 PCV 
     /* set antenna paramters */
     if (popt_.mode!=PMODE_SINGLE) {
         setpcv(obss.n>0?obss.data[0].time:timeget(),&popt_,&navs,&pcvss,&pcvsr,
                stas);
     }
+
+    // 调用 readotl() 读取潮汐参数
     /* read ocean tide loading parameters */
     if (popt_.mode>PMODE_SINGLE&&*fopt->blq) {
         readotl(&popt_,fopt->blq,stas);
     }
+    // FIXED 模式，调用 antpos() 得到流动站坐标
     /* rover/reference fixed position */
     if (popt_.mode==PMODE_FIXED) {
         if (!antpos(&popt_,1,&obss,&navs,stas,fopt->stapos)) {
@@ -970,12 +1123,15 @@ static int execses(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
             return 0;
         }
     }
+    // DGPS、KINEMA、STATIC 模式，调用 antpos() 得到基准站坐标
     else if (PMODE_DGPS<=popt_.mode&&popt_.mode<=PMODE_STATIC) {
         if (!antpos(&popt_,2,&obss,&navs,stas,fopt->stapos)) {
             freeobsnav(&obss,&navs);
             return 0;
         }
     }
+
+    // 创建解算状态文件（内容包括残差、高度角等，解算效果不好的时候输出来看具体为啥算不好）
     /* open solution statistics */
     if (flag&&sopt->sstat>0) {
         strcpy(statfile,outfile);
@@ -983,6 +1139,8 @@ static int execses(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
         rtkclosestat();
         rtkopenstat(statfile,sopt->sstat);
     }
+
+    // 调用 outhead() 创建结果文件，输出结果文件的文件头
     /* write header to output file */
     if (flag&&!outhead(outfile,infile,n,&popt_,sopt)) {
         freeobsnav(&obss,&navs);
@@ -990,30 +1148,32 @@ static int execses(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
     }
     iobsu=iobsr=isbs=revs=aborts=0;
     
+    // 针对不同的滤波解算类型，inputobs() 函数内读取文件数据的顺序不同
     if (popt_.mode==PMODE_SINGLE||popt_.soltype==0) {
         if ((fp=openfile(outfile))) {
-            procpos(fp,&popt_,sopt,0); /* forward */
+            procpos(fp,&popt_,sopt,0); /* forward */    // 前向滤波
             fclose(fp);
         }
     }
     else if (popt_.soltype==1) {
         if ((fp=openfile(outfile))) {
             revs=1; iobsu=iobsr=obss.n-1; isbs=sbss.n-1;
-            procpos(fp,&popt_,sopt,0); /* backward */
+            procpos(fp,&popt_,sopt,0); /* backward */   // 后向滤波
             fclose(fp);
         }
     }
     else { /* combined */
-        solf=(sol_t *)malloc(sizeof(sol_t)*nepoch);
-        solb=(sol_t *)malloc(sizeof(sol_t)*nepoch);
-        rbf=(double *)malloc(sizeof(double)*nepoch*3);
-        rbb=(double *)malloc(sizeof(double)*nepoch*3);
+        // 开辟内存空间
+        solf=(sol_t *)malloc(sizeof(sol_t)*nepoch);     // 前向结果
+        solb=(sol_t *)malloc(sizeof(sol_t)*nepoch);     // 后向结果
+        rbf=(double *)malloc(sizeof(double)*nepoch*3);  // 前向基准站坐标
+        rbb=(double *)malloc(sizeof(double)*nepoch*3);  // 后向基准站坐标
         
-        if (solf&&solb) {
+        if (solf&&solb) {   // 判断内存开辟成功
             isolf=isolb=0;
-            procpos(NULL,&popt_,sopt,1); /* forward */
-            revs=1; iobsu=iobsr=obss.n-1; isbs=sbss.n-1;
-            procpos(NULL,&popt_,sopt,1); /* backward */
+            procpos(NULL,&popt_,sopt,1); /* forward */      // 前向滤波
+            revs=1; iobsu=iobsr=obss.n-1; isbs=sbss.n-1;    
+            procpos(NULL,&popt_,sopt,1); /* backward */     // 后向滤波
             
             /* combine forward/backward solutions */
             if (!aborts&&(fp=openfile(outfile))) {
@@ -1032,7 +1192,22 @@ static int execses(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
     
     return aborts?1:0;
 }
-/* execute processing session for each rover ---------------------------------*/
+
+//对每个流动站执行定位过程
+/* execute processing session for each rover ---------------------------------
+ * args:gtime_t ts              I   处理的起始时间，写0表示不限制
+ *      gtime_t te              I   处理的起始时间，写0表示不限制
+ *      double ti               I   处理的间隔时间 (s)，写0表示不限制，全处理
+ *      const prcopt_t *popt    I   处理选项结构体
+ *      const solopt_t *sopt    I   结果选项结构体
+ *      const filopt_t *fopt    I   文件选项结构体
+ *      int flag                I   用于控制输出
+ *      char **infile           I   传入文件路径数组首地址
+ *      const int *index        I   传入文件路径数组首地址
+ *      int n                   I   传入文件数量
+ *      char *outfile           I   输出文件的路径，写0表示stdout终端
+ *      const char *rov         I   流动站ID列表，空格隔开
+ -----------------------------------------------------------------------------*/
 static int execses_r(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
                      const solopt_t *sopt, const filopt_t *fopt, int flag,
                      char **infile, const int *index, int n, char *outfile,
@@ -1046,6 +1221,7 @@ static int execses_r(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
     
     for (i=0;i<n;i++) if (strstr(infile[i],"%r")) break;
     
+    // 如果某个 infile[i] 含有流动站 ID 的替换符
     if (i<n) { /* include rover keywords */
         if (!(rov_=(char *)malloc(strlen(rov)+1))) return 0;
         strcpy(rov_,rov);
@@ -1082,7 +1258,23 @@ static int execses_r(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
     }
     return stat;
 }
-/* execute processing session for each base station --------------------------*/
+
+//对每个基准站执行定位过程
+/* execute processing session for each base station --------------------------
+ * args:gtime_t ts              I   处理的起始时间，写0表示不限制
+ *      gtime_t te              I   处理的起始时间，写0表示不限制
+ *      double ti               I   处理的间隔时间 (s)，写0表示不限制，全处理
+ *      const prcopt_t *popt    I   处理选项结构体
+ *      const solopt_t *sopt    I   结果选项结构体
+ *      const filopt_t *fopt    I   文件选项结构体
+ *      int flag                I   用于控制输出
+ *      char **infile           I   传入文件路径数组首地址
+ *      const int *index        I   传入文件路径数组首地址
+ *      int n                   I   传入文件数量
+ *      char *outfile           I   输出文件的路径，写 0 表示输出到 stdout 终端
+ *      const char *rov         I   流动站ID列表，空格隔开
+ *      const char *base        I   基准站ID列表，空格隔开
+ -----------------------------------------------------------------------------*/
 static int execses_b(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
                      const solopt_t *sopt, const filopt_t *fopt, int flag,
                      char **infile, const int *index, int n, char *outfile,
@@ -1095,17 +1287,22 @@ static int execses_b(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
     trace(3,"execses_b: n=%d outfile=%s\n",n,outfile);
     
     /* read prec ephemeris and sbas data */
+    // 调用 readpreceph() 读取精密星历和 SBAS 数据
     readpreceph(infile,n,popt,&navs,&sbss);
     
+    // %b：基准站 ID 的替换符
     for (i=0;i<n;i++) if (strstr(infile[i],"%b")) break;
     
+    // 如果某个 infile[i] 含有基准站 ID 的替换符，找基准站文件
     if (i<n) { /* include base station keywords */
+        // 为 base_ 开辟空间，将 base 赋值给 base_
         if (!(base_=(char *)malloc(strlen(base)+1))) {
             freepreceph(&navs,&sbss);
             return 0;
         }
         strcpy(base_,base);
         
+        // 为 ifile[] 开辟空间
         for (i=0;i<n;i++) {
             if (!(ifile[i]=(char *)malloc(1024))) {
                 free(base_); for (;i>=0;i--) free(ifile[i]);
@@ -1113,25 +1310,30 @@ static int execses_b(gtime_t ts, gtime_t te, double ti, const prcopt_t *popt,
                 return 0;
             }
         }
+
+        // 遍历 base_ 基准站字符串
         for (p=base_;;p=q+1) { /* for each base station */
-            if ((q=strchr(p,' '))) *q='\0';
+            if ((q=strchr(p,' '))) *q='\0';     // 拆出一个基准站
             
             if (*p) {
-                strcpy(proc_base,p);
+                strcpy(proc_base,p);            // 把基准站名赋值给 proc_base
                 if (ts.time) time2str(ts,s,0); else *s='\0';
                 if (checkbrk("reading    : %s",s)) {
                     stat=1;
                     break;
                 }
+                // 循环替换 infile[i] 里的基准站 ID 的替换符到 ifile[i]
                 for (i=0;i<n;i++) reppath(infile[i],ifile[i],t0,"",p);
+                // 替换 outfile 里的基准站 ID 替换符到 ofile
                 reppath(outfile,ofile,t0,"",p);
-                
+                // 调用 execses_r() 进行下一步解算
                 stat=execses_r(ts,te,ti,popt,sopt,fopt,flag,ifile,index,n,ofile,rov);
             }
             if (stat==1||!q) break;
         }
         free(base_); for (i=0;i<n;i++) free(ifile[i]);
     }
+    // infile[i] 都没有有基准站 ID 的替换符，直接调用 execses_r() 进行下一步解算
     else {
         stat=execses_r(ts,te,ti,popt,sopt,fopt,flag,infile,index,n,outfile,rov);
     }
@@ -1209,7 +1411,11 @@ extern int postpos(gtime_t ts, gtime_t te, double ti, double tu,
     /* open processing session */
     if (!openses(popt,sopt,fopt,&navs,&pcvss,&pcvsr)) return -1;
     
-    // 判断起始时间 ts、te、处理单位时间是否大于 0
+    // 判断 ts、te、tint 时间是否大于 0，即是否设置了合理的时间，有三种情况
+    // 1. if (ts.time!=0&&te.time!=0&&tu>=0.0) {...
+    // 2. else if (ts.time!=0) {...
+    // 3. else...                                  
+    
     if (ts.time!=0&&te.time!=0&&tu>=0.0) {
         if (timediff(te,ts)<0.0) {
             showmsg("error : no period");
@@ -1225,15 +1431,17 @@ extern int postpos(gtime_t ts, gtime_t te, double ti, double tu,
         }
         if (tu==0.0||tu>86400.0*MAXPRCDAYS) tu=86400.0*MAXPRCDAYS;
         settspan(ts,te);
-        tunit=tu<86400.0?tu:86400.0;
+        tunit=tu<86400.0?tu:86400.0;                        // tunit：如果 tu 小于一天就为 tu，否则为一天
         tss=tunit*(int)floor(time2gpst(ts,&week)/tunit);
         
+        // 根据解算时间单元，分时间段循环处理，算出来 tts>te 或过程有错误，结束循环
+        // 很多时候解算单元时间直接设 0.0，只循环一次，tts=ts，tte=te
         for (i=0;;i++) { /* for each periods */
-            tts=gpst2time(week,tss+i*tu);
-            tte=timeadd(tts,tu-DTTOL);
-            if (timediff(tts,te)>0.0) break;
-            if (timediff(tts,ts)<0.0) tts=ts;
-            if (timediff(tte,te)>0.0) tte=te;
+            tts=gpst2time(week,tss+i*tu);       // 解算单元开始时间，每次循环加上一个 i 个 tu
+            tte=timeadd(tts,tu-DTTOL);          // 解算结束时间 tte=tu-DTTOL
+            if (timediff(tts,te)>0.0) break;    // 算出来 tts>te 结束循环
+            if (timediff(tts,ts)<0.0) tts=ts;   // 分时间段后 tts 若早于 ts，设为 ts
+            if (timediff(tte,te)>0.0) tte=te;   // 分时间段后 tte 若早于 te，设为 te
             
             strcpy(proc_rov ,"");
             strcpy(proc_base,"");
@@ -1249,14 +1457,15 @@ extern int postpos(gtime_t ts, gtime_t te, double ti, double tu,
                     strcpy(ifile[nf++],infile[j]);
                 }
                 else {
+                    // 星历文件，包括精密星历和广播星历
                     /* include next day precise ephemeris or rinex brdc nav */
                     ttte=tte;
                     if (ext&&(!strcmp(ext,".sp3")||!strcmp(ext,".SP3")||
                               !strcmp(ext,".eph")||!strcmp(ext,".EPH"))) {
-                        ttte=timeadd(ttte,3600.0);
+                        ttte=timeadd(ttte,3600.0);          // 精密星历加一小时
                     }
                     else if (strstr(infile[j],"brdc")) {
-                        ttte=timeadd(ttte,7200.0);
+                        ttte=timeadd(ttte,7200.0);          // 广播星历加两小时
                     }
                     nf+=reppaths(infile[j],ifile+nf,MAXINFILE-nf,tts,ttte,"","");
                 }
